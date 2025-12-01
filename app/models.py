@@ -698,3 +698,94 @@ class VppRuleLog(db.Model):
             "status": self.status,
             "error_message": self.error_message,
         }
+
+
+# ==========================================
+# 7. AUTO-DISCOVERY (Otomatik Keşif) KATMANI
+# ==========================================
+
+
+class DiscoveryStatus(str, Enum):
+    """Keşfedilen cihaz durumu."""
+    PENDING = "PENDING"        # Onay bekliyor
+    CLAIMED = "CLAIMED"        # Sahiplenildi (Node'a terfi etti)
+    IGNORED = "IGNORED"        # Kullanıcı tarafından yoksayıldı
+    EXPIRED = "EXPIRED"        # Zaman aşımına uğradı
+
+
+class DiscoveryQueue(db.Model):
+    """
+    Henüz sahiplenilmemiş, başıboş cihazların havuzu (Araf Tablosu).
+    
+    Gateway bilinmeyen bir cihazdan sinyal aldığında buraya kaydeder.
+    Kullanıcı onaylarsa Node tablosuna terfi eder.
+    """
+    __tablename__ = "discovery_queue"
+
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Bu cihazı hangi Gateway (Device) duydu? 
+    # Güvenlik için önemli: Sadece gateway sahibi görebilir
+    reported_by_device_id = db.Column(
+        db.Integer, 
+        db.ForeignKey("devices.id"), 
+        nullable=False,
+        index=True
+    )
+    
+    # Cihazın benzersiz kimliği (LoRa DevEUI, MAC, Modbus IP:SlaveID vb.)
+    device_identifier = db.Column(db.String(100), nullable=False, index=True)
+    
+    # Haberleşme protokolü (LORA, MODBUS, ZIGBEE vb.)
+    protocol = db.Column(db.String(30), default="UNKNOWN")
+    
+    # Tahmin edilen cihaz tipi (payload'dan çıkarılabilir)
+    guessed_type = db.Column(db.String(50))  # SENSOR_NODE, INVERTER vb.
+    
+    # Tahmin edilen marka/model (Modbus cevabından)
+    guessed_brand = db.Column(db.String(50))
+    guessed_model = db.Column(db.String(100))
+    
+    # Ham veri (Cihazın ne olduğunu anlamak için ipucu)
+    # Örn: {"rssi": -80, "payload": "temp=24", "ip": "192.168.1.50"}
+    raw_data = db.Column(JSON, default=dict)
+    
+    # Sinyal gücü (varsa)
+    signal_strength = db.Column(db.Float)
+    
+    # Durum
+    status = db.Column(
+        db.String(20), 
+        default=DiscoveryStatus.PENDING.value,
+        index=True
+    )
+    
+    # Zaman damgaları
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Kaç kez görüldü (Güvenilirlik için)
+    seen_count = db.Column(db.Integer, default=1)
+
+    # İlişki
+    reporter = db.relationship("Device", backref="discovered_devices")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "device_identifier": self.device_identifier,
+            "protocol": self.protocol,
+            "guessed_type": self.guessed_type,
+            "guessed_brand": self.guessed_brand,
+            "guessed_model": self.guessed_model,
+            "signal_strength": self.signal_strength,
+            "status": self.status,
+            "first_seen_at": self.first_seen_at.isoformat() if self.first_seen_at else None,
+            "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,
+            "seen_count": self.seen_count,
+            "raw_data": self.raw_data or {},
+            # Gateway bilgileri
+            "gateway_id": self.reported_by_device_id,
+            "gateway_name": self.reporter.name if self.reporter else None,
+            "site_name": self.reporter.site.name if self.reporter and self.reporter.site else None,
+        }

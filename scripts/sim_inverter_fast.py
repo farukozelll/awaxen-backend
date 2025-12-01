@@ -1,24 +1,60 @@
 """Telemetry simulator for the fastest-reporting solar inverter."""
 from __future__ import annotations
 
-import random
-
 try:  # pragma: no cover - runtime import convenience
-    from .telemetry_simulator import SimulatorConfig, TelemetrySimulator
+    from .telemetry_simulator import (
+        MeasurementSpec,
+        SimulatorConfig,
+        TelemetrySimulator,
+        build_payload_from_specs,
+    )
 except ImportError:  # pragma: no cover
-    from telemetry_simulator import SimulatorConfig, TelemetrySimulator
+    from telemetry_simulator import (  # type: ignore
+        MeasurementSpec,
+        SimulatorConfig,
+        TelemetrySimulator,
+        build_payload_from_specs,
+    )
+
+
+INVERTER_MEASUREMENTS: tuple[MeasurementSpec, ...] = (
+    MeasurementSpec(
+        name="production_kw",
+        min_value=3.5,
+        max_value=5.5,
+        precision=2,
+        unit="kW",
+        description="Real-time AC output power",
+    ),
+    MeasurementSpec(
+        name="dc_bus_voltage_v",
+        min_value=760,
+        max_value=840,
+        precision=1,
+        unit="V",
+        description="DC bus voltage",
+    ),
+    MeasurementSpec(
+        name="dc_bus_current_a",
+        min_value=4.5,
+        max_value=7.0,
+        precision=2,
+        unit="A",
+        description="DC bus current",
+    ),
+    MeasurementSpec(
+        name="ac_frequency_hz",
+        min_value=49.9,
+        max_value=50.1,
+        precision=2,
+        unit="Hz",
+        description="Inverter AC frequency",
+    ),
+)
 
 
 def build_inverter_payload() -> dict[str, float]:
-    production_kw = round(random.uniform(4.5, 5.2), 2)
-    dc_voltage = round(random.uniform(780, 820), 1)
-    ac_frequency = round(random.uniform(49.9, 50.1), 2)
-
-    return {
-        "production_kw": production_kw,
-        "dc_bus_voltage_v": dc_voltage,
-        "ac_frequency_hz": ac_frequency,
-    }
+    return build_payload_from_specs(INVERTER_MEASUREMENTS)
 
 
 def create_simulator() -> TelemetrySimulator:

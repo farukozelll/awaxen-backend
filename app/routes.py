@@ -7,7 +7,10 @@ import requests
 
 from flask import Blueprint, request, jsonify, g
 from . import db
-from .models import User, Site, Device, Node, Telemetry, Command, SensorData, Asset, Tariff, VppRule
+from .models import (
+    User, Site, Device, Node, Telemetry, Command, SensorData, Asset, 
+    Tariff, VppRule, DiscoveryQueue, DiscoveryStatus
+)
 from .auth import requires_auth, get_current_user_id
 from .services import (
     # Device işlemleri
@@ -710,7 +713,7 @@ def get_site_detail(site_id):
 @requires_auth
 def update_site(site_id):
     """
-    Saha bilgilerini güncelle.
+    Bir sahayı güncelle.
     ---
     tags:
       - Saha
@@ -720,581 +723,30 @@ def update_site(site_id):
         required: true
         schema:
           type: integer
-      - in: body
-        name: payload
-        schema:
-          type: object
-          properties:
-            name:
-              type: string
-            city:
-              type: string
-            location:
-              type: string
     responses:
       200:
         description: Saha güncellendi
     """
     user = get_or_create_user()
-    site = Site.query.filter_by(id=site_id, user_id=user.id).first()
-
-    if not site:
-        return jsonify({"error": "Saha bulunamadı"}), 404
-
-    data = request.json or {}
-    site.name = data.get("name", site.name)
-    site.city = data.get("city", site.city)
-    site.location = data.get("location", site.location)
-    site.latitude = data.get("latitude", site.latitude)
-    site.longitude = data.get("longitude", site.longitude)
-    db.session.commit()
-
-    updated = {
-        "id": site.id,
-        "name": site.name,
-        "city": site.city,
-        "location": site.location,
-        "latitude": site.latitude,
-        "longitude": site.longitude,
-        "device_count": len(site.devices),
-    }
-
-    return jsonify({"message": "Saha güncellendi", "site": updated})
-
-@main.route('/api/sites/<int:site_id>', methods=['DELETE'])
-@requires_auth
-def delete_site(site_id):
-    """
-    Sahayı sil.
-    ---
-    tags:
-      - Saha
-    parameters:
-      - in: path
-        name: site_id
-        required: true
-        schema:
-          type: integer
-    responses:
-      200:
-        description: Saha silindi
-    """
-    user = get_or_create_user()
-    site = Site.query.filter_by(id=site_id, user_id=user.id).first()
-
-    if not site:
-        return jsonify({"error": "Saha bulunamadı"}), 404
-
-    db.session.delete(site)
-    db.session.commit()
-
-    return jsonify({"message": "Saha silindi"})
-
-@main.route('/api/sites/<int:site_id>/weather', methods=['GET'])
-@requires_auth
-def get_site_weather(site_id):
-    """
-    Sahanın koordinatına göre anlık hava durumunu getir (15 dk cache).
-    ---
-    tags:
-      - Saha
-    security:
-      - bearerAuth: []
-    parameters:
-      - in: path
-        name: site_id
-        required: true
-        schema:
-          type: integer
-    responses:
-      200:
-        description: Hava durumu verisi
-    """
-    user = get_or_create_user()
     if not user:
         return jsonify({"error": "Kullanıcı bulunamadı"}), 401
 
-    site = Site.query.filter_by(id=site_id, user_id=user.id).first()
-    if not site:
-        return jsonify({"error": "Saha bulunamadı"}), 404
-
-    lat, lon = resolve_site_coordinates(site)
-    if lat is None or lon is None:
-        return jsonify({"error": "Bu sahanın koordinatları girilmemiş"}), 400
-
-    # --- CACHE KONTROLÜ (PARA TASARRUFU) ---
-    current_time = time.time()
-
-    if site_id in weather_cache:
-        last_update = weather_cache[site_id]["timestamp"]
-        if current_time - last_update < CACHE_TIMEOUT:
-            print(f"Site {site_id} için CACHE'den veri dönüldü.")
-            return jsonify(weather_cache[site_id]["data"])
-
-    # --- API İSTEĞİ (Sadece Cache Yoksa/Eskidiyse Çalışır) ---
-    print(f"Site {site_id} için OpenWeather API'ye gidiliyor...")
-
-    api_key = os.getenv("OPENWEATHER_API_KEY")
-    if not api_key:
-        return jsonify({"error": "OPENWEATHER_API_KEY tanımlı değil"}), 500
-
-    url = (
-        "https://api.openweathermap.org/data/2.5/weather"
-        f"?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=tr"
-    )
-
     try:
-        response = requests.get(url, timeout=6)
-        data = response.json()
-
-        if response.status_code != 200:
-            return jsonify({"error": "Hava durumu alınamadı", "detail": data}), 400
-
-        weather_summary = {
-            "temp": data["main"]["temp"],
-            "humidity": data["main"]["humidity"],
-            "description": data["weather"][0]["description"],
-            "icon": data["weather"][0]["icon"],
-            "wind_speed": data.get("wind", {}).get("speed", 0),
-            "cloudiness": data.get("clouds", {}).get("all", 0),  # Solar için önemli
-        }
-
-        # --- HAFIZAYA KAYDET ---
-        weather_cache[site_id] = {
-            "data": weather_summary,
-            "timestamp": current_time,
-        }
-
-        return jsonify(weather_summary)
-
-    except Exception as e:
-        # Hata olursa ve elimizde eski cache varsa onu dönelim
-        if site_id in weather_cache:
-            print(f"API hatası, eski cache dönülüyor: {e}")
-            return jsonify(weather_cache[site_id]["data"])
-        return jsonify({"error": "Hava durumu servisine ulaşılamadı"}), 502
-
-
-# --- DEVICE (CİHAZ) YÖNETİMİ ---
-@main.route('/api/devices', methods=['GET'])
-@requires_auth
-def get_all_devices():
-    """
-    Kullanıcının tüm sahalarındaki cihazları getir (pagination + filtreleme).
-    ---
-    tags:
-      - Cihaz
-    security:
-      - bearerAuth: []
-    parameters:
-      - in: query
-        name: page
-        schema:
-          type: integer
-          default: 1
-      - in: query
-        name: pageSize
-        schema:
-          type: integer
-          default: 20
-      - in: query
-        name: search
-        schema:
-          type: string
-        description: İsim veya seri numarası içinde arama
-      - in: query
-        name: sortBy
-        schema:
-          type: string
-          enum: [id, name, serial_number, is_online]
-          default: id
-      - in: query
-        name: sortOrder
-        schema:
-          type: string
-          enum: [asc, desc]
-          default: asc
-    responses:
-      200:
-        description: Cihaz listesi (paginated)
-    """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
-
-    page, page_size = get_pagination_params()
-    filters = get_filter_params()
-
-    # Kullanıcının site ID'lerini al
-    user_site_ids = [s.id for s in user.sites]
-
-    # Base query
-    query = Device.query.filter(Device.site_id.in_(user_site_ids))
-
-    # Search filter
-    if filters["search"]:
-        search_term = f"%{filters['search']}%"
-        query = query.filter(
-            db.or_(
-                Device.name.ilike(search_term),
-                Device.serial_number.ilike(search_term),
-            )
-        )
-
-    # Sorting
-    allowed_sort = ["id", "name", "serial_number", "is_online"]
-    query = apply_sorting(query, Device, filters["sort_by"], filters["sort_order"], allowed_sort)
-
-    # Total count
-    total = query.count()
-
-    # Pagination
-    devices_page = query.offset((page - 1) * page_size).limit(page_size).all()
-
-    items = [{
-        "id": d.id,
-        "site_id": d.site_id,
-        "site_name": d.site.name,
-        "serial_number": d.serial_number,
-        "name": d.name,
-        "model": d.model,
-        "firmware_version": d.firmware_version,
-        "is_online": d.is_online,
-        "last_seen": d.last_seen.isoformat() if d.last_seen else None,
-        "node_count": len(d.nodes),
-    } for d in devices_page]
-
-    return jsonify(paginate_response(items, total, page, page_size))
-
-
-@main.route('/api/sites/<int:site_id>/devices', methods=['GET'])
-@requires_auth
-def get_site_devices(site_id):
-    """
-    Bir sahadaki cihazları listele (pagination + filtreleme).
-    ---
-    tags:
-      - Cihaz
-    parameters:
-      - in: path
-        name: site_id
-        required: true
-        schema:
-          type: integer
-      - in: query
-        name: page
-        schema:
-          type: integer
-          default: 1
-      - in: query
-        name: pageSize
-        schema:
-          type: integer
-          default: 20
-      - in: query
-        name: search
-        schema:
-          type: string
-      - in: query
-        name: sortBy
-        schema:
-          type: string
-          enum: [id, name, serial_number, is_online]
-          default: id
-      - in: query
-        name: sortOrder
-        schema:
-          type: string
-          enum: [asc, desc]
-          default: asc
-    responses:
-      200:
-        description: Sahaya ait cihazlar (paginated)
-    """
-    user = get_or_create_user()
-    site = Site.query.filter_by(id=site_id, user_id=user.id).first()
-
-    if not site:
-        return jsonify({"error": "Saha bulunamadı"}), 404
-
-    page, page_size = get_pagination_params()
-    filters = get_filter_params()
-
-    query = Device.query.filter_by(site_id=site_id)
-
-    if filters["search"]:
-        search_term = f"%{filters['search']}%"
-        query = query.filter(
-            db.or_(
-                Device.name.ilike(search_term),
-                Device.serial_number.ilike(search_term),
-            )
-        )
-
-    allowed_sort = ["id", "name", "serial_number", "is_online"]
-    query = apply_sorting(query, Device, filters["sort_by"], filters["sort_order"], allowed_sort)
-
-    total = query.count()
-    devices_page = query.offset((page - 1) * page_size).limit(page_size).all()
-
-    items = [{
-        "id": d.id,
-        "serial_number": d.serial_number,
-        "name": d.name,
-        "model": d.model,
-        "firmware_version": d.firmware_version,
-        "is_online": d.is_online,
-        "last_seen": d.last_seen.isoformat() if d.last_seen else None,
-        "node_count": len(d.nodes),
-    } for d in devices_page]
-
-    return jsonify(paginate_response(items, total, page, page_size))
-
-
-@main.route('/api/devices', methods=['POST'])
-@requires_auth
-def create_device():
-    """
-    Yeni cihaz ekle.
-    ---
-    tags:
-      - Cihaz
-    consumes:
-      - application/json
-    parameters:
-      - in: body
-        name: device
-        schema:
-          type: object
-          properties:
-            site_id:
-              type: integer
-              example: 1
-            serial_number:
-              type: string
-              example: AWX-CORE-0002
-            name:
-              type: string
-              example: Giriş Panosu
-            model:
-              type: string
-              example: Raspberry Pi 4
-            firmware_version:
-              type: string
-              example: v1.2.0
-            metadata:
-              type: object
-              example: {"ip": "192.168.1.50"}
-    responses:
-      201:
-        description: Cihaz oluşturuldu
-    """
-    user = get_or_create_user()
-    try:
-        new_device = create_device_logic(user.id, request.json)
-        return jsonify({"message": "Cihaz oluşturuldu", "device_id": new_device.id}), 201
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 403
-
-@main.route('/api/devices/<int:device_id>', methods=['PUT'])
-@requires_auth
-def update_device(device_id):
-    """
-    Bir cihazın bilgilerini güncelle.
-    ---
-    tags:
-      - Cihaz
-    parameters:
-      - in: path
-        name: device_id
-        required: true
-        schema:
-          type: integer
-      - in: body
-        name: payload
-        schema:
-          type: object
-          properties:
-            name:
-              type: string
-            serial_number:
-              type: string
-            model:
-              type: string
-            firmware_version:
-              type: string
-            metadata:
-              type: object
-    responses:
-      200:
-        description: Cihaz güncellendi
-    """
-    user = get_or_create_user()
-    try:
-        update_device_logic(user.id, device_id, request.json)
-        return jsonify({"message": "Cihaz güncellendi"})
+        updated_site = update_site_logic(user.id, site_id, request.json or {})
+        return jsonify({
+            "message": "Saha güncellendi",
+            "site": updated_site.to_dict()
+        })
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
 
-@main.route('/api/devices/<int:device_id>', methods=['DELETE'])
-@requires_auth
-def delete_device(device_id):
-    """
-    Bir cihazı ve bağlı node'ları sil.
-    ---
-    tags:
-      - Cihaz
-    parameters:
-      - in: path
-        name: device_id
-        required: true
-        schema:
-          type: integer
-    responses:
-      200:
-        description: Cihaz silindi
-    """
-    user = get_or_create_user()
-    try:
-        delete_device_logic(user.id, device_id)
-        return jsonify({"message": "Cihaz silindi"})
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
-
-@main.route('/api/devices/<int:device_id>/nodes', methods=['GET'])
-@requires_auth
-def get_device_nodes(device_id):
-    """
-    Bir cihazdaki node'ları listele (pagination + filtreleme).
-    ---
-    tags:
-      - Node
-    parameters:
-      - in: path
-        name: device_id
-        required: true
-        schema:
-          type: integer
-      - in: query
-        name: page
-        schema:
-          type: integer
-          default: 1
-      - in: query
-        name: pageSize
-        schema:
-          type: integer
-          default: 20
-      - in: query
-        name: search
-        schema:
-          type: string
-      - in: query
-        name: sortBy
-        schema:
-          type: string
-          enum: [id, name, node_type]
-          default: id
-      - in: query
-        name: sortOrder
-        schema:
-          type: string
-          enum: [asc, desc]
-          default: asc
-    responses:
-      200:
-        description: Node listesi (paginated)
-    """
-    user = get_or_create_user()
-
-    device = Device.query.join(Site).filter(
-        Device.id == device_id,
-        Site.user_id == user.id
-    ).first()
-
-    if not device:
-        return jsonify({"error": "Cihaz bulunamadı"}), 404
-
-    page, page_size = get_pagination_params()
-    filters = get_filter_params()
-
-    query = Node.query.filter_by(device_id=device_id)
-
-    if filters["search"]:
-        search_term = f"%{filters['search']}%"
-        query = query.filter(Node.name.ilike(search_term))
-
-    allowed_sort = ["id", "name", "node_type"]
-    query = apply_sorting(query, Node, filters["sort_by"], filters["sort_order"], allowed_sort)
-
-    total = query.count()
-    nodes_page = query.offset((page - 1) * page_size).limit(page_size).all()
-
-    items = [{
-        "id": n.id,
-        "name": n.name,
-        "node_type": n.node_type,
-        "configuration": n.configuration,
-    } for n in nodes_page]
-
-    return jsonify(paginate_response(items, total, page, page_size))
-
-@main.route('/api/nodes', methods=['POST'])
-@requires_auth
-def create_node():
-    """
-    Cihaza yeni node ekle.
-    ---
-    tags:
-      - Node
-    consumes:
-      - application/json
-    parameters:
-      - in: body
-        name: node
-        schema:
-          type: object
-          properties:
-            device_id:
-              type: integer
-            name:
-              type: string
-            node_type:
-              type: string
-              example: SENSOR
-            configuration:
-              type: object
-    responses:
-      201:
-        description: Node oluşturuldu
-    """
-    user = get_or_create_user()
-    data = request.json
-
-    device = Device.query.join(Site).filter(
-        Device.id == data.get("device_id"),
-        Site.user_id == user.id
-    ).first()
-
-    if not device:
-        return jsonify({"error": "Cihaz bulunamadı"}), 404
-
-    node = Node(
-        device_id=device.id,
-        name=data.get("name"),
-        node_type=data.get("node_type", "SENSOR"),
-        configuration=data.get("configuration"),
-    )
-    db.session.add(node)
-    db.session.commit()
-
-    return jsonify({"message": "Node oluşturuldu", "node_id": node.id}), 201
 
 @main.route('/api/nodes/<int:node_id>', methods=['PUT'])
 @requires_auth
 def update_node(node_id):
     """
     Bir node'un bilgilerini güncelle.
+
     ---
     tags:
       - Node
@@ -1313,29 +765,42 @@ def update_node(node_id):
               type: string
             node_type:
               type: string
+            protocol:
+              type: string
+            node_address:
+              type: string
+            battery_level:
+              type: number
+            signal_strength:
+              type: number
+            brand:
+              type: string
+            model_number:
+              type: string
+            capacity_info:
+              type: object
             configuration:
               type: object
+            last_seen:
+              type: string
+              example: 2025-01-01T12:00:00Z
     responses:
       200:
         description: Node güncellendi
     """
     user = get_or_create_user()
-    node = Node.query.join(Device).join(Site).filter(
-        Node.id == node_id,
-        Site.user_id == user.id,
-    ).first()
+    if not user:
+        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
 
-    if not node:
-        return jsonify({"error": "Node bulunamadı"}), 404
+    try:
+        node = update_node_logic(user.id, node_id, request.json or {})
+        return jsonify({
+            "message": "Node güncellendi",
+            "node": node.to_dict()
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
 
-    data = request.json or {}
-    node.name = data.get("name", node.name)
-    node.node_type = data.get("node_type", node.node_type)
-    if "configuration" in data:
-        node.configuration = data.get("configuration")
-    db.session.commit()
-
-    return jsonify({"message": "Node güncellendi"})
 
 @main.route('/api/nodes/<int:node_id>', methods=['DELETE'])
 @requires_auth
@@ -1368,11 +833,6 @@ def delete_node(node_id):
     db.session.commit()
 
     return jsonify({"message": "Node silindi"})
-
-# --- KOMUT GÖNDERME ---
-@main.route('/api/commands', methods=['POST'])
-@requires_auth
-def send_command():
     """
     Bir node'a komut gönder.
     ---
@@ -2407,3 +1867,283 @@ def get_vpp_summary():
     # TODO: Bugünkü tetiklenme sayısı için VppRuleLog sorgusu
     
     return jsonify(summary)
+
+
+# ===========================================
+# AUTO-DISCOVERY (Otomatik Keşif) YÖNETİMİ
+# ===========================================
+
+@main.route('/api/discovery/pending', methods=['GET'])
+@requires_auth
+def get_pending_discoveries():
+    """
+    Kullanıcının Gateway'leri tarafından bulunan ama henüz eklenmemiş cihazları getir.
+    ---
+    tags:
+      - Discovery
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Bekleyen keşifler listesi
+    """
+    user = get_or_create_user()
+    if not user:
+        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    
+    # Kullanıcının tüm gateway'lerini bul
+    user_gateways = Device.query.join(Site).filter(Site.user_id == user.id).all()
+    gateway_ids = [d.id for d in user_gateways]
+    
+    if not gateway_ids:
+        return jsonify([])
+    
+    # Bu gateway'lerin bulduğu bekleyen cihazları getir
+    pending = (
+        DiscoveryQueue.query
+        .filter(
+            DiscoveryQueue.reported_by_device_id.in_(gateway_ids),
+            DiscoveryQueue.status == DiscoveryStatus.PENDING.value
+        )
+        .order_by(DiscoveryQueue.last_seen_at.desc())
+        .all()
+    )
+    
+    return jsonify([d.to_dict() for d in pending])
+
+
+@main.route('/api/discovery/claim', methods=['POST'])
+@requires_auth
+def claim_discovered_device():
+    """
+    Keşfedilen bir cihazı "Gerçek Node" olarak kaydet (Sahiplen).
+    ---
+    tags:
+      - Discovery
+    security:
+      - bearerAuth: []
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: payload
+        schema:
+          type: object
+          required:
+            - discovery_id
+            - name
+          properties:
+            discovery_id:
+              type: integer
+              description: Keşif kaydının ID'si
+            name:
+              type: string
+              description: Cihaza verilecek isim
+            node_type:
+              type: string
+              description: Cihaz tipi (SENSOR_NODE, INVERTER, vb.)
+            protocol:
+              type: string
+              description: Haberleşme protokolü
+    responses:
+      201:
+        description: Cihaz başarıyla eklendi
+      404:
+        description: Keşif bulunamadı
+      403:
+        description: Yetkisiz işlem
+    """
+    user = get_or_create_user()
+    if not user:
+        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    
+    data = request.json or {}
+    discovery_id = data.get("discovery_id")
+    name = data.get("name", "").strip()
+    
+    if not discovery_id:
+        return jsonify({"error": "discovery_id zorunludur"}), 400
+    
+    if not name:
+        return jsonify({"error": "Cihaz adı zorunludur"}), 400
+    
+    # 1. Keşif kaydını bul
+    discovery = DiscoveryQueue.query.get(discovery_id)
+    if not discovery:
+        return jsonify({"error": "Keşif kaydı bulunamadı"}), 404
+    
+    # 2. Yetki kontrolü (Bu keşfi yapan gateway benim mi?)
+    gateway = discovery.reporter
+    if not gateway or not gateway.site or gateway.site.user_id != user.id:
+        return jsonify({"error": "Bu cihazı ekleme yetkiniz yok"}), 403
+    
+    # 3. Zaten sahiplenilmiş mi?
+    if discovery.status != DiscoveryStatus.PENDING.value:
+        return jsonify({"error": f"Bu cihaz zaten işlenmiş (durum: {discovery.status})"}), 400
+    
+    # 4. Node tablosuna terfi ettir
+    node_type = data.get("node_type") or discovery.guessed_type or "SENSOR_NODE"
+    protocol = data.get("protocol") or discovery.protocol or "UNKNOWN"
+    
+    new_node = Node(
+        device_id=gateway.id,
+        name=name,
+        node_address=discovery.device_identifier,
+        node_type=node_type,
+        protocol=protocol,
+        brand=discovery.guessed_brand,
+        model_number=discovery.guessed_model,
+        configuration=discovery.raw_data or {},
+    )
+    db.session.add(new_node)
+    
+    # 5. Keşif durumunu güncelle
+    discovery.status = DiscoveryStatus.CLAIMED.value
+    
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Cihaz başarıyla eklendi",
+        "node": new_node.to_dict(),
+        "gateway": {
+            "id": gateway.id,
+            "name": gateway.name,
+            "serial_number": gateway.serial_number,
+        }
+    }), 201
+
+
+@main.route('/api/discovery/<int:discovery_id>/ignore', methods=['POST'])
+@requires_auth
+def ignore_discovered_device(discovery_id):
+    """
+    Keşfedilen bir cihazı yoksay (Listeden kaldır).
+    ---
+    tags:
+      - Discovery
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: discovery_id
+        required: true
+        schema:
+          type: integer
+    responses:
+      200:
+        description: Cihaz yoksayıldı
+      404:
+        description: Keşif bulunamadı
+    """
+    user = get_or_create_user()
+    if not user:
+        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    
+    discovery = DiscoveryQueue.query.get(discovery_id)
+    if not discovery:
+        return jsonify({"error": "Keşif kaydı bulunamadı"}), 404
+    
+    # Yetki kontrolü
+    gateway = discovery.reporter
+    if not gateway or not gateway.site or gateway.site.user_id != user.id:
+        return jsonify({"error": "Bu işlem için yetkiniz yok"}), 403
+    
+    discovery.status = DiscoveryStatus.IGNORED.value
+    db.session.commit()
+    
+    return jsonify({"message": "Cihaz yoksayıldı"})
+
+
+@main.route('/api/discovery/<int:discovery_id>', methods=['DELETE'])
+@requires_auth
+def delete_discovered_device(discovery_id):
+    """
+    Keşif kaydını tamamen sil.
+    ---
+    tags:
+      - Discovery
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: discovery_id
+        required: true
+        schema:
+          type: integer
+    responses:
+      200:
+        description: Keşif silindi
+      404:
+        description: Keşif bulunamadı
+    """
+    user = get_or_create_user()
+    if not user:
+        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    
+    discovery = DiscoveryQueue.query.get(discovery_id)
+    if not discovery:
+        return jsonify({"error": "Keşif kaydı bulunamadı"}), 404
+    
+    # Yetki kontrolü
+    gateway = discovery.reporter
+    if not gateway or not gateway.site or gateway.site.user_id != user.id:
+        return jsonify({"error": "Bu işlem için yetkiniz yok"}), 403
+    
+    db.session.delete(discovery)
+    db.session.commit()
+    
+    return jsonify({"message": "Keşif kaydı silindi"})
+
+
+@main.route('/api/discovery/stats', methods=['GET'])
+@requires_auth
+def get_discovery_stats():
+    """
+    Keşif istatistiklerini getir.
+    ---
+    tags:
+      - Discovery
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Keşif istatistikleri
+    """
+    user = get_or_create_user()
+    if not user:
+        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    
+    # Kullanıcının gateway'leri
+    user_gateways = Device.query.join(Site).filter(Site.user_id == user.id).all()
+    gateway_ids = [d.id for d in user_gateways]
+    
+    if not gateway_ids:
+        return jsonify({
+            "pending_count": 0,
+            "claimed_count": 0,
+            "ignored_count": 0,
+            "total_gateways": 0,
+        })
+    
+    # İstatistikler
+    pending_count = DiscoveryQueue.query.filter(
+        DiscoveryQueue.reported_by_device_id.in_(gateway_ids),
+        DiscoveryQueue.status == DiscoveryStatus.PENDING.value
+    ).count()
+    
+    claimed_count = DiscoveryQueue.query.filter(
+        DiscoveryQueue.reported_by_device_id.in_(gateway_ids),
+        DiscoveryQueue.status == DiscoveryStatus.CLAIMED.value
+    ).count()
+    
+    ignored_count = DiscoveryQueue.query.filter(
+        DiscoveryQueue.reported_by_device_id.in_(gateway_ids),
+        DiscoveryQueue.status == DiscoveryStatus.IGNORED.value
+    ).count()
+    
+    return jsonify({
+        "pending_count": pending_count,
+        "claimed_count": claimed_count,
+        "ignored_count": ignored_count,
+        "total_gateways": len(gateway_ids),
+    })

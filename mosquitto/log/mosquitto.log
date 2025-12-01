@@ -4149,3 +4149,40 @@
 1764600248: Client awaxen-backend closed its connection.
 1764600249: New connection from 172.18.0.5:40061 on port 1883.
 1764600249: New client connected from 172.18.0.5:40061 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764601598: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764603314: New connection from 172.18.0.5:54309 on port 1883.
+1764603314: Client awaxen-backend already connected, closing old connection.
+1764603314: New client connected from 172.18.0.5:54309 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764603314: Client awaxen-backend closed its connection.
+1764603315: New connection from 172.18.0.5:40799 on port 1883.
+1764603315: New client connected from 172.18.0.5:40799 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764603315: New connection from 172.18.0.5:51277 on port 1883.
+1764603315: Client awaxen-backend already connected, closing old connection.
+1764603315: New client connected from 172.18.0.5:51277 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764603315: Client awaxen-backend closed its connection.
+1764603316: New connection from 172.18.0.5:60545 on port 1883.
+1764603316: New client connected from 172.18.0.5:60545 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764603330: Client awaxen-backend closed its connection.
+1764603331: New connection from 172.18.0.5:54981 on port 1883.
+1764603331: New client connected from 172.18.0.5:54981 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764603398: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764604691: Client awaxen-backend closed its connection.
+1764604694: New connection from 172.18.0.5:52437 on port 1883.
+1764604694: New client connected from 172.18.0.5:52437 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764604812: Client awaxen-backend closed its connection.
+1764604815: New connection from 172.18.0.5:60883 on port 1883.
+1764604815: New client connected from 172.18.0.5:60883 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764605199: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764607000: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764608800: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764610601: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764611860: New connection from 172.18.0.1:53258 on port 1883.
+1764611860: New client connected from 172.18.0.1:53258 as discovery-sim-06061dc9 (p2, c1, k30).
+1764611865: Client discovery-sim-06061dc9 disconnected.
+1764612402: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764614203: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764616003: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764617804: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764619605: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764621405: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764623206: Saving in-memory database to /mosquitto/data//mosquitto.db.

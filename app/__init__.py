@@ -41,6 +41,15 @@ def create_app():
         SWAGGER={
             "title": "Awaxen Industrial API",
             "uiversion": 3,
+            "securityDefinitions": {
+                "bearerAuth": {
+                    "type": "apiKey",
+                    "name": "Authorization",
+                    "in": "header",
+                    "description": "Bearer <JWT> formatında token giriniz",
+                }
+            },
+            "security": [{"bearerAuth": []}],
         },
         MQTT_BROKER_URL=os.getenv("MQTT_BROKER_URL"),
         MQTT_BROKER_PORT=int(os.getenv("MQTT_BROKER_PORT", "1883")),

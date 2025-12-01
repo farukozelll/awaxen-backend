@@ -1,24 +1,52 @@
 """Telemetry simulator for the battery energy storage system."""
 from __future__ import annotations
 
-import random
-
 try:  # pragma: no cover - runtime import convenience
-    from .telemetry_simulator import SimulatorConfig, TelemetrySimulator
+    from .telemetry_simulator import (
+        MeasurementSpec,
+        SimulatorConfig,
+        TelemetrySimulator,
+        build_payload_from_specs,
+    )
 except ImportError:  # pragma: no cover
-    from telemetry_simulator import SimulatorConfig, TelemetrySimulator
+    from telemetry_simulator import (  # type: ignore
+        MeasurementSpec,
+        SimulatorConfig,
+        TelemetrySimulator,
+        build_payload_from_specs,
+    )
+
+
+BATTERY_MEASUREMENTS: tuple[MeasurementSpec, ...] = (
+    MeasurementSpec(
+        name="state_of_charge_pct",
+        min_value=35,
+        max_value=97,
+        precision=1,
+        unit="%",
+        description="Battery rack state of charge",
+    ),
+    MeasurementSpec(
+        name="cabinet_temp_c",
+        min_value=20,
+        max_value=38,
+        precision=1,
+        unit="°C",
+        description="Battery cabinet internal temperature",
+    ),
+    MeasurementSpec(
+        name="charge_power_kw",
+        min_value=-25,
+        max_value=25,
+        precision=2,
+        unit="kW",
+        description="Positive=charging, Negative=discharging",
+    ),
+)
 
 
 def build_battery_payload() -> dict[str, float]:
-    soc_percent = round(random.uniform(40, 95), 1)
-    cabinet_temp_c = round(random.uniform(22, 34), 1)
-    charge_power_kw = round(random.uniform(-20, 20), 2)  # negative = discharge
-
-    return {
-        "state_of_charge_pct": soc_percent,
-        "cabinet_temp_c": cabinet_temp_c,
-        "charge_power_kw": charge_power_kw,
-    }
+    return build_payload_from_specs(BATTERY_MEASUREMENTS)
 
 
 def create_simulator() -> TelemetrySimulator:

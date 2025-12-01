@@ -255,9 +255,31 @@ def update_device_logic(user_id: int, device_id: int, data: Dict[str, Any]) -> D
     if not data:
         return device
 
-    for field in ("name", "serial_number", "model", "firmware_version"):
+    updatable_fields = (
+        "name",
+        "serial_number",
+        "model",
+        "firmware_version",
+        "status",
+        "ip_address",
+        "mac_address",
+    )
+
+    for field in updatable_fields:
         if field in data and data[field] is not None:
             setattr(device, field, data[field])
+
+    if "last_seen" in data:
+        last_seen_val = data["last_seen"]
+        if isinstance(last_seen_val, str):
+            try:
+                last_seen_val = datetime.fromisoformat(last_seen_val.replace("Z", "+00:00"))
+            except ValueError:
+                last_seen_val = None
+        device.last_seen = last_seen_val
+
+    if "is_online" in data:
+        device.is_online = bool(data["is_online"])
 
     if "metadata" in data or "metadata_info" in data:
         device.metadata_info = _resolve_metadata(data)
@@ -314,13 +336,30 @@ def update_node_logic(user_id: int, node_id: int, data: Dict[str, Any]) -> Node:
         return node
 
     updatable_fields = [
-        "name", "node_type", "protocol", "node_address",
-        "battery_level", "signal_strength", "configuration"
+        "name",
+        "node_type",
+        "protocol",
+        "node_address",
+        "battery_level",
+        "signal_strength",
+        "configuration",
+        "brand",
+        "model_number",
+        "capacity_info",
     ]
 
     for field in updatable_fields:
         if field in data:
             setattr(node, field, data[field])
+
+    if "last_seen" in data:
+        last_seen_val = data["last_seen"]
+        if isinstance(last_seen_val, str):
+            try:
+                last_seen_val = datetime.fromisoformat(last_seen_val.replace("Z", "+00:00"))
+            except ValueError:
+                last_seen_val = None
+        node.last_seen = last_seen_val
 
     db.session.commit()
     return node

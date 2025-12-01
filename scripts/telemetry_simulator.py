@@ -6,12 +6,34 @@ import os
 import random
 import threading
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import requests
 
 
 PayloadBuilder = Callable[[], Dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class MeasurementSpec:
+    """Definition of a single inventory signal in telemetry payload."""
+
+    name: str
+    min_value: float
+    max_value: float
+    precision: int = 2
+    unit: str | None = None
+    description: str | None = None
+
+    def sample(self) -> float:
+        value = random.uniform(self.min_value, self.max_value)
+        return round(value, self.precision)
+
+
+def build_payload_from_specs(specs: Sequence[MeasurementSpec]) -> Dict[str, float]:
+    """Generate a payload dict using the provided measurement specs."""
+
+    return {spec.name: spec.sample() for spec in specs}
 
 
 def _default_api_url() -> str:
