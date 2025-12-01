@@ -1,0 +1,13 @@
+flask
+flask-cors
+flask-sqlalchemy
+flask-migrate
+psycopg2-binary
+python-dotenv
+PyJWT[crypto]
+flasgger
+requests
+flask-socketio
+gevent
+gevent-websocket
+paho-mqtt
