@@ -4114,3 +4114,38 @@
 1764597014: Client awaxen-backend closed its connection.
 1764597014: New connection from 172.18.0.5:51641 on port 1883.
 1764597014: New client connected from 172.18.0.5:51641 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764597996: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764599683: Client awaxen-backend closed its connection.
+1764599685: New connection from 172.18.0.5:46299 on port 1883.
+1764599685: New client connected from 172.18.0.5:46299 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764599797: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1764600161: New connection from 172.18.0.5:52583 on port 1883.
+1764600161: Client awaxen-backend already connected, closing old connection.
+1764600161: New client connected from 172.18.0.5:52583 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600161: Client awaxen-backend closed its connection.
+1764600162: New connection from 172.18.0.5:56845 on port 1883.
+1764600162: New client connected from 172.18.0.5:56845 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600166: New connection from 172.18.0.5:49555 on port 1883.
+1764600166: Client awaxen-backend already connected, closing old connection.
+1764600166: New client connected from 172.18.0.5:49555 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600166: Client awaxen-backend closed its connection.
+1764600167: New connection from 172.18.0.5:49039 on port 1883.
+1764600167: New client connected from 172.18.0.5:49039 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600237: New connection from 172.18.0.5:60521 on port 1883.
+1764600237: Client awaxen-backend already connected, closing old connection.
+1764600237: New client connected from 172.18.0.5:60521 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600237: Client awaxen-backend closed its connection.
+1764600238: New connection from 172.18.0.5:58811 on port 1883.
+1764600238: New client connected from 172.18.0.5:58811 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600247: New connection from 172.18.0.5:49921 on port 1883.
+1764600247: Client awaxen-backend already connected, closing old connection.
+1764600247: New client connected from 172.18.0.5:49921 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600247: Client awaxen-backend closed its connection.
+1764600248: New connection from 172.18.0.5:57447 on port 1883.
+1764600248: New client connected from 172.18.0.5:57447 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600248: New connection from 172.18.0.5:42291 on port 1883.
+1764600248: Client awaxen-backend already connected, closing old connection.
+1764600248: New client connected from 172.18.0.5:42291 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
+1764600248: Client awaxen-backend closed its connection.
+1764600249: New connection from 172.18.0.5:40061 on port 1883.
+1764600249: New client connected from 172.18.0.5:40061 as awaxen-backend (p2, c1, k60, u'awaxen_admin').
