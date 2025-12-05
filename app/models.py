@@ -323,6 +323,9 @@ class Node(db.Model):
     # Sinyal gücü (RSSI, dBm cinsinden)
     signal_strength = db.Column(db.Float)
     
+    # Gateway'e olan tahmini mesafe (metre)
+    distance_estimate = db.Column(db.Float)
+    
     # Son görülme zamanı
     last_seen = db.Column(db.DateTime)
     
@@ -364,6 +367,7 @@ class Node(db.Model):
             "node_address": self.node_address,
             "battery_level": self.battery_level,
             "signal_strength": self.signal_strength,
+            "distance_estimate": self.distance_estimate,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             # Inverter alanları
             "brand": self.brand,
@@ -752,6 +756,8 @@ class DiscoveryQueue(db.Model):
     
     # Sinyal gücü (varsa)
     signal_strength = db.Column(db.Float)
+    # Gateway'e tahmini mesafe (metre)
+    distance_estimate = db.Column(db.Float)
     
     # Durum
     status = db.Column(
@@ -779,6 +785,7 @@ class DiscoveryQueue(db.Model):
             "guessed_brand": self.guessed_brand,
             "guessed_model": self.guessed_model,
             "signal_strength": self.signal_strength,
+            "distance_estimate": self.distance_estimate,
             "status": self.status,
             "first_seen_at": self.first_seen_at.isoformat() if self.first_seen_at else None,
             "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,

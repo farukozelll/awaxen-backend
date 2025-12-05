@@ -73,10 +73,14 @@ def create_app():
         print("Tablolar kontrol edildi ve oluşturuldu.")
         _seed_initial_data()
 
-    # Rotaları kaydet
-    from .routes import main
-
-    app.register_blueprint(main)
+    # Rotaları kaydet (Modüler Blueprint yapısı)
+    from .api import api_bp
+    app.register_blueprint(api_bp)
+    
+    # Ana sayfa için basit route (api prefix'siz)
+    @app.route('/')
+    def home():
+        return "Awaxen Industrial Backend Hazır!"
 
     # Socket event handler'larını kaydet
     from . import realtime  # noqa: F401
