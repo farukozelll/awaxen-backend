@@ -8,16 +8,66 @@ from flasgger import swag_from
 
 from app.extensions import db
 from app.models import Integration, SmartDevice
-from app.api.helpers import get_current_user
+from app.api.helpers import (
+    get_current_user,
+    get_pagination_params,
+    paginate_response,
+)
 from app.services.shelly_service import ShellyService
+from app.auth import requires_auth
 
 integrations_bp = Blueprint("integrations", __name__)
 
 
 @integrations_bp.route("/integrations", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Integrations"],
-    "summary": "Organizasyonun entegrasyonlarını listele"
+    "summary": "Organizasyonun entegrasyonlarını listele",
+    "parameters": [
+        {
+            "name": "page",
+            "in": "query",
+            "type": "integer",
+            "default": 1,
+            "description": "Sayfa numarası"
+        },
+        {
+            "name": "pageSize",
+            "in": "query",
+            "type": "integer",
+            "default": 20,
+            "description": "Sayfa başına kayıt (max 100)"
+        },
+        {
+            "name": "provider",
+            "in": "query",
+            "type": "string",
+            "description": "Sağlayıcıya göre filtrele (shelly, tapo, tesla)"
+        },
+        {
+            "name": "status",
+            "in": "query",
+            "type": "string",
+            "description": "Duruma göre filtrele (active, paused)"
+        },
+    ],
+    "responses": {
+        200: {
+            "description": "Paginated entegrasyon listesi",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"$ref": "#/definitions/Integration"}
+                    },
+                    "pagination": {"$ref": "#/definitions/Pagination"}
+                }
+            }
+        },
+        401: {"description": "Yetkisiz erişim"}
+    }
 })
 def list_integrations():
     """Aktif entegrasyonları listele."""
@@ -25,12 +75,25 @@ def list_integrations():
     if not user or not user.organization_id:
         return jsonify({"error": "Unauthorized"}), 401
     
-    integrations = Integration.query.filter_by(
+    page, page_size = get_pagination_params()
+    provider = request.args.get("provider")
+    status = request.args.get("status")
+    
+    query = Integration.query.filter_by(
         organization_id=user.organization_id,
         is_active=True
-    ).all()
+    )
     
-    return jsonify([i.to_dict() for i in integrations])
+    if provider:
+        query = query.filter(Integration.provider.ilike(f"%{provider}%"))
+    if status:
+        query = query.filter(Integration.status == status)
+    
+    query = query.order_by(Integration.created_at.desc())
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    
+    return jsonify(paginate_response([i.to_dict() for i in items], total, page, page_size))
 
 
 @integrations_bp.route("/integrations/<uuid:integration_id>", methods=["GET"])

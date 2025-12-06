@@ -9,17 +9,81 @@ from flasgger import swag_from
 
 from app.extensions import db
 from app.models import Organization, User
-from app.api.helpers import get_current_user
+from app.api.helpers import (
+    get_current_user,
+    get_pagination_params,
+    paginate_response,
+    apply_sorting,
+)
+from app.auth import requires_auth
 
 organizations_bp = Blueprint("organizations", __name__)
 
 
 @organizations_bp.route("/organizations", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Organizations"],
     "summary": "Kullanıcının organizasyonlarını listele",
+    "parameters": [
+        {
+            "name": "page",
+            "in": "query",
+            "type": "integer",
+            "default": 1,
+            "description": "Sayfa numarası"
+        },
+        {
+            "name": "pageSize",
+            "in": "query",
+            "type": "integer",
+            "default": 20,
+            "description": "Sayfa başına kayıt (max 100)"
+        },
+        {
+            "name": "search",
+            "in": "query",
+            "type": "string",
+            "description": "İsme göre arama"
+        },
+        {
+            "name": "sortBy",
+            "in": "query",
+            "type": "string",
+            "enum": ["name", "created_at", "subscription_plan"],
+            "default": "created_at",
+            "description": "Sıralama alanı"
+        },
+        {
+            "name": "sortOrder",
+            "in": "query",
+            "type": "string",
+            "enum": ["asc", "desc"],
+            "default": "desc",
+            "description": "Sıralama yönü"
+        },
+        {
+            "name": "is_active",
+            "in": "query",
+            "type": "boolean",
+            "description": "Aktif durumuna göre filtrele"
+        },
+    ],
     "responses": {
-        200: {"description": "Organizasyon listesi"}
+        200: {
+            "description": "Organizasyon listesi",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"$ref": "#/definitions/Organization"}
+                    },
+                    "pagination": {"$ref": "#/definitions/Pagination"}
+                }
+            }
+        },
+        401: {"description": "Yetkisiz erişim"}
     }
 })
 def list_organizations():
@@ -28,16 +92,31 @@ def list_organizations():
     if not user:
         return jsonify({"error": "Unauthorized"}), 401
     
-    # Admin tüm organizasyonları görebilir, diğerleri sadece kendininkileri
-    if user.role == "superadmin":
-        organizations = Organization.query.filter_by(is_active=True).all()
-    else:
-        organizations = Organization.query.filter_by(
-            id=user.organization_id,
-            is_active=True
-        ).all()
+    page, page_size = get_pagination_params()
+    search = request.args.get("search", "", type=str).strip()
+    sort_by = request.args.get("sortBy", "created_at")
+    sort_order = request.args.get("sortOrder", "desc").lower()
+    is_active = request.args.get("is_active")
     
-    return jsonify([org.to_dict() for org in organizations])
+    query = Organization.query
+    
+    if user.role != "superadmin":
+        query = query.filter_by(id=user.organization_id)
+    
+    if is_active is not None:
+        query = query.filter_by(is_active=is_active.lower() == "true")
+    else:
+        query = query.filter_by(is_active=True)
+    
+    if search:
+        query = query.filter(Organization.name.ilike(f"%{search}%"))
+    
+    query = apply_sorting(query, Organization, sort_by, sort_order, ["name", "created_at", "subscription_plan"])
+    
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    
+    return jsonify(paginate_response([org.to_dict() for org in items], total, page, page_size))
 
 
 @organizations_bp.route("/organizations/<uuid:org_id>", methods=["GET"])

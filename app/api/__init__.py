@@ -14,11 +14,13 @@ api_bp = Blueprint('api', __name__, url_prefix='/api')
 from .routes_organizations import organizations_bp
 from .routes_integrations import integrations_bp
 from .routes_automations import automations_bp
+from .routes_dashboard import bp as dashboard_bp
 
 # Blueprint'leri kaydet
 api_bp.register_blueprint(organizations_bp)
 api_bp.register_blueprint(integrations_bp)
 api_bp.register_blueprint(automations_bp)
+api_bp.register_blueprint(dashboard_bp, url_prefix="/dashboard")
 
 # ==========================================
 # Mevcut Routes

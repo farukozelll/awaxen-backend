@@ -8,7 +8,11 @@ from flasgger import swag_from
 
 from app.extensions import db
 from app.models import Automation, AutomationLog, SmartAsset
-from app.api.helpers import get_current_user
+from app.api.helpers import (
+    get_current_user,
+    get_pagination_params,
+    paginate_response,
+)
 from app.services.automation_engine import automation_engine
 from app.auth import requires_auth
 
@@ -19,7 +23,51 @@ automations_bp = Blueprint("automations", __name__)
 @requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Otomasyonları listele"
+    "summary": "Otomasyonları listele",
+    "parameters": [
+        {
+            "name": "page",
+            "in": "query",
+            "type": "integer",
+            "default": 1,
+            "description": "Sayfa numarası"
+        },
+        {
+            "name": "pageSize",
+            "in": "query",
+            "type": "integer",
+            "default": 20,
+            "description": "Sayfa başına kayıt (max 100)"
+        },
+        {
+            "name": "search",
+            "in": "query",
+            "type": "string",
+            "description": "İsme göre arama"
+        },
+        {
+            "name": "is_active",
+            "in": "query",
+            "type": "boolean",
+            "description": "Aktif durumuna göre filtrele"
+        },
+    ],
+    "responses": {
+        200: {
+            "description": "Paginated automation listesi",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"$ref": "#/definitions/Automation"}
+                    },
+                    "pagination": {"$ref": "#/definitions/Pagination"}
+                }
+            }
+        },
+        401: {"description": "Yetkisiz erişim"}
+    }
 })
 def list_automations():
     """Organizasyonun otomasyonlarını listele."""
@@ -27,11 +75,24 @@ def list_automations():
     if not user or not user.organization_id:
         return jsonify({"error": "Unauthorized"}), 401
     
-    automations = Automation.query.filter_by(
-        organization_id=user.organization_id
-    ).order_by(Automation.created_at.desc()).all()
+    page, page_size = get_pagination_params()
+    search = request.args.get("search", "", type=str).strip()
+    is_active = request.args.get("is_active")
     
-    return jsonify([a.to_dict() for a in automations])
+    query = Automation.query.filter_by(organization_id=user.organization_id)
+    
+    if search:
+        query = query.filter(Automation.name.ilike(f"%{search}%"))
+    
+    if is_active is not None:
+        bool_value = is_active.lower() == "true"
+        query = query.filter(Automation.is_active == bool_value)
+    
+    query = query.order_by(Automation.created_at.desc())
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+    
+    return jsonify(paginate_response([a.to_dict() for a in items], total, page, page_size))
 
 
 @automations_bp.route("/automations/<uuid:automation_id>", methods=["GET"])
@@ -65,6 +126,7 @@ def get_automation(automation_id):
 @swag_from({
     "tags": ["Automations"],
     "summary": "Yeni otomasyon oluştur",
+    "consumes": ["application/json"],
     "parameters": [
         {
             "name": "body",
@@ -86,7 +148,15 @@ def get_automation(automation_id):
                 "required": ["name", "rules"]
             }
         }
-    ]
+    ],
+    "responses": {
+        201: {
+            "description": "Otomasyon oluşturuldu",
+            "schema": {"$ref": "#/definitions/Automation"}
+        },
+        400: {"description": "Geçersiz istek"},
+        401: {"description": "Yetkisiz erişim"}
+    }
 })
 def create_automation():
     """
@@ -150,7 +220,37 @@ def create_automation():
 @requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Otomasyonu güncelle"
+    "summary": "Otomasyonu güncelle",
+    "consumes": ["application/json"],
+    "parameters": [
+        {
+            "name": "automation_id",
+            "in": "path",
+            "required": True,
+            "type": "string",
+            "description": "Otomasyon UUID"
+        },
+        {
+            "name": "body",
+            "in": "body",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "rules": {"type": "object"},
+                    "is_active": {"type": "boolean"},
+                    "asset_id": {"type": "string"}
+                }
+            }
+        }
+    ],
+    "responses": {
+        200: {"description": "Otomasyon güncellendi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetkisiz organizasyon"},
+        404: {"description": "Otomasyon bulunamadı"}
+    }
 })
 def update_automation(automation_id):
     """Otomasyon kurallarını güncelle."""
@@ -185,7 +285,22 @@ def update_automation(automation_id):
 @requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Otomasyonu sil"
+    "summary": "Otomasyonu sil",
+    "parameters": [
+        {
+            "name": "automation_id",
+            "in": "path",
+            "required": True,
+            "type": "string",
+            "description": "Otomasyon UUID"
+        }
+    ],
+    "responses": {
+        200: {"description": "Otomasyon silindi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetkisiz organizasyon"},
+        404: {"description": "Otomasyon bulunamadı"}
+    }
 })
 def delete_automation(automation_id):
     """Otomasyonu sil."""
