@@ -10,11 +10,13 @@ from app.extensions import db
 from app.models import Automation, AutomationLog, SmartAsset
 from app.api.helpers import get_current_user
 from app.services.automation_engine import automation_engine
+from app.auth import requires_auth
 
 automations_bp = Blueprint("automations", __name__)
 
 
 @automations_bp.route("/automations", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
     "summary": "Otomasyonları listele"
@@ -33,6 +35,7 @@ def list_automations():
 
 
 @automations_bp.route("/automations/<uuid:automation_id>", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
     "summary": "Otomasyon detayı"
@@ -58,6 +61,7 @@ def get_automation(automation_id):
 
 
 @automations_bp.route("/automations", methods=["POST"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
     "summary": "Yeni otomasyon oluştur",
@@ -143,6 +147,7 @@ def create_automation():
 
 
 @automations_bp.route("/automations/<uuid:automation_id>", methods=["PUT"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
     "summary": "Otomasyonu güncelle"
@@ -177,6 +182,7 @@ def update_automation(automation_id):
 
 
 @automations_bp.route("/automations/<uuid:automation_id>", methods=["DELETE"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
     "summary": "Otomasyonu sil"
