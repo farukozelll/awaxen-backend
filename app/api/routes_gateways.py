@@ -261,15 +261,18 @@ def create_gateway():
     if existing:
         return jsonify({"error": "Serial number already exists"}), 409
 
+    settings = data.get("settings", {}).copy()
+    settings["display_name"] = data["name"]
+    if data.get("firmware_version"):
+        settings["firmware_version"] = data["firmware_version"]
+
     gateway = Gateway(
         organization_id=user.organization_id,
-        name=data["name"],
         serial_number=data["serial_number"],
         model=data.get("model"),
-        firmware_version=data.get("firmware_version"),
         ip_address=data.get("ip_address"),
         mac_address=data.get("mac_address"),
-        settings=data.get("settings", {}),
+        settings=settings,
     )
     db.session.add(gateway)
     db.session.commit()

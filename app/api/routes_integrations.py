@@ -97,9 +97,19 @@ def list_integrations():
 
 
 @integrations_bp.route("/integrations/<uuid:integration_id>", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Integrations"],
-    "summary": "Entegrasyon detayı"
+    "summary": "Entegrasyon detayı",
+    "parameters": [
+        {"name": "integration_id", "in": "path", "type": "string", "required": True}
+    ],
+    "responses": {
+        200: {"description": "Entegrasyon bilgileri"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Entegrasyon bulunamadı"}
+    }
 })
 def get_integration(integration_id):
     """Tek bir entegrasyonun detaylarını getir."""
@@ -116,9 +126,11 @@ def get_integration(integration_id):
 
 
 @integrations_bp.route("/integrations", methods=["POST"])
+@requires_auth
 @swag_from({
     "tags": ["Integrations"],
     "summary": "Yeni entegrasyon ekle",
+    "consumes": ["application/json"],
     "parameters": [
         {
             "name": "body",
@@ -129,12 +141,18 @@ def get_integration(integration_id):
                     "provider": {"type": "string", "example": "shelly"},
                     "access_token": {"type": "string"},
                     "refresh_token": {"type": "string"},
-                    "provider_data": {"type": "object"}
+                    "provider_data": {"type": "object"},
+                    "expires_at": {"type": "string", "format": "date-time"}
                 },
                 "required": ["provider", "access_token"]
             }
         }
-    ]
+    ],
+    "responses": {
+        201: {"description": "Entegrasyon oluşturuldu"},
+        400: {"description": "Geçersiz istek"},
+        401: {"description": "Yetkisiz erişim"}
+    }
 })
 def create_integration():
     """
@@ -184,9 +202,32 @@ def create_integration():
 
 
 @integrations_bp.route("/integrations/<uuid:integration_id>", methods=["PUT"])
+@requires_auth
 @swag_from({
     "tags": ["Integrations"],
-    "summary": "Entegrasyonu güncelle"
+    "summary": "Entegrasyonu güncelle",
+    "parameters": [
+        {"name": "integration_id", "in": "path", "type": "string", "required": True},
+        {
+            "name": "body",
+            "in": "body",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "access_token": {"type": "string"},
+                    "refresh_token": {"type": "string"},
+                    "provider_data": {"type": "object"},
+                    "status": {"type": "string"}
+                }
+            }
+        }
+    ],
+    "responses": {
+        200: {"description": "Entegrasyon güncellendi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Entegrasyon bulunamadı"}
+    }
 })
 def update_integration(integration_id):
     """Entegrasyon token'larını güncelle."""
@@ -216,9 +257,19 @@ def update_integration(integration_id):
 
 
 @integrations_bp.route("/integrations/<uuid:integration_id>", methods=["DELETE"])
+@requires_auth
 @swag_from({
     "tags": ["Integrations"],
-    "summary": "Entegrasyonu sil"
+    "summary": "Entegrasyonu sil",
+    "parameters": [
+        {"name": "integration_id", "in": "path", "type": "string", "required": True}
+    ],
+    "responses": {
+        200: {"description": "Entegrasyon deaktive edildi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Entegrasyon bulunamadı"}
+    }
 })
 def delete_integration(integration_id):
     """Entegrasyonu deaktive et."""
@@ -238,10 +289,22 @@ def delete_integration(integration_id):
 
 
 @integrations_bp.route("/integrations/<uuid:integration_id>/sync", methods=["POST"])
+@requires_auth
 @swag_from({
     "tags": ["Integrations"],
     "summary": "Cihazları senkronize et",
-    "description": "Bulut API'den cihazları çeker ve veritabanına kaydeder."
+    "description": "Bulut API'den cihazları çeker ve veritabanına kaydeder.",
+    "parameters": [
+        {"name": "integration_id", "in": "path", "type": "string", "required": True}
+    ],
+    "responses": {
+        200: {"description": "Senkronizasyon sonucu"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Entegrasyon bulunamadı"},
+        501: {"description": "Henüz desteklenmeyen provider"},
+        500: {"description": "Sync sırasında hata"}
+    }
 })
 def sync_integration_devices(integration_id):
     """
@@ -284,9 +347,19 @@ def sync_integration_devices(integration_id):
 
 
 @integrations_bp.route("/integrations/<uuid:integration_id>/devices", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Integrations"],
-    "summary": "Entegrasyona bağlı cihazları listele"
+    "summary": "Entegrasyona bağlı cihazları listele",
+    "parameters": [
+        {"name": "integration_id", "in": "path", "type": "string", "required": True}
+    ],
+    "responses": {
+        200: {"description": "Cihaz listesi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Entegrasyon bulunamadı"}
+    }
 })
 def list_integration_devices(integration_id):
     """Entegrasyona bağlı cihazları listele."""
@@ -310,7 +383,10 @@ def list_integration_devices(integration_id):
 @integrations_bp.route("/integrations/providers", methods=["GET"])
 @swag_from({
     "tags": ["Integrations"],
-    "summary": "Desteklenen entegrasyon sağlayıcıları"
+    "summary": "Desteklenen entegrasyon sağlayıcıları",
+    "responses": {
+        200: {"description": "Sağlayıcı listesi"}
+    }
 })
 def list_providers():
     """Desteklenen bulut entegrasyon sağlayıcılarını listele."""

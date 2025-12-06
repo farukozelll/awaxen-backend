@@ -125,7 +125,13 @@ def list_organizations():
     "summary": "Organizasyon detayı",
     "parameters": [
         {"name": "org_id", "in": "path", "type": "string", "required": True}
-    ]
+    ],
+    "responses": {
+        200: {"description": "Organizasyon bilgileri"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Organizasyon bulunamadı"}
+    }
 })
 def get_organization(org_id):
     """Tek bir organizasyonun detaylarını getir."""
@@ -156,12 +162,18 @@ def get_organization(org_id):
                     "name": {"type": "string", "example": "Ahmet'in Evi"},
                     "type": {"type": "string", "example": "home"},
                     "timezone": {"type": "string", "example": "Europe/Istanbul"},
-                    "location": {"type": "object"}
+                    "location": {"type": "object"},
+                    "settings": {"type": "object"}
                 },
                 "required": ["name"]
             }
         }
-    ]
+    ],
+    "responses": {
+        201: {"description": "Organizasyon oluşturuldu"},
+        400: {"description": "Geçersiz veri"},
+        401: {"description": "Yetkisiz erişim"}
+    }
 })
 def create_organization():
     """Yeni organizasyon oluştur."""
@@ -206,7 +218,31 @@ def create_organization():
 @organizations_bp.route("/organizations/<uuid:org_id>", methods=["PUT"])
 @swag_from({
     "tags": ["Organizations"],
-    "summary": "Organizasyonu güncelle"
+    "summary": "Organizasyonu güncelle",
+    "parameters": [
+        {"name": "org_id", "in": "path", "type": "string", "required": True},
+        {
+            "name": "body",
+            "in": "body",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "type": {"type": "string"},
+                    "timezone": {"type": "string"},
+                    "location": {"type": "object"},
+                    "settings": {"type": "object"},
+                    "subscription_plan": {"type": "string"}
+                }
+            }
+        }
+    ],
+    "responses": {
+        200: {"description": "Organizasyon güncellendi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Organizasyon bulunamadı"}
+    }
 })
 def update_organization(org_id):
     """Organizasyon bilgilerini güncelle."""
@@ -243,7 +279,16 @@ def update_organization(org_id):
 @organizations_bp.route("/organizations/<uuid:org_id>", methods=["DELETE"])
 @swag_from({
     "tags": ["Organizations"],
-    "summary": "Organizasyonu sil (soft delete)"
+    "summary": "Organizasyonu sil (soft delete)",
+    "parameters": [
+        {"name": "org_id", "in": "path", "type": "string", "required": True}
+    ],
+    "responses": {
+        200: {"description": "Organizasyon deaktive edildi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Organizasyon bulunamadı"}
+    }
 })
 def delete_organization(org_id):
     """Organizasyonu deaktive et (soft delete)."""
@@ -266,7 +311,54 @@ def delete_organization(org_id):
 @organizations_bp.route("/organizations/<uuid:org_id>/users", methods=["GET"])
 @swag_from({
     "tags": ["Organizations"],
-    "summary": "Organizasyondaki kullanıcıları listele"
+    "summary": "Organizasyondaki kullanıcıları listele",
+    "parameters": [
+        {
+            "name": "org_id",
+            "in": "path",
+            "type": "string",
+            "required": True,
+            "description": "Organizasyon UUID"
+        },
+        {
+            "name": "page",
+            "in": "query",
+            "type": "integer",
+            "default": 1,
+            "description": "Sayfa numarası"
+        },
+        {
+            "name": "pageSize",
+            "in": "query",
+            "type": "integer",
+            "default": 20,
+            "description": "Sayfa başına kayıt (max 100)"
+        },
+        {
+            "name": "search",
+            "in": "query",
+            "type": "string",
+            "description": "İsme veya e-postaya göre arama"
+        },
+    ],
+    "responses": {
+        200: {
+            "description": "Kullanıcı listesi",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"$ref": "#/definitions/User"}
+                    },
+                    "pagination": {"$ref": "#/definitions/Pagination"}
+                }
+            }
+        },
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Organizasyon bulunamadı"}
+    }
 })
 def list_organization_users(org_id):
     """Organizasyona ait kullanıcıları listele."""
@@ -280,15 +372,39 @@ def list_organization_users(org_id):
     if user.role != "superadmin" and user.organization_id != org.id:
         return jsonify({"error": "Forbidden"}), 403
     
-    users = User.query.filter_by(organization_id=org.id, is_active=True).all()
+    page, page_size = get_pagination_params()
+    search = request.args.get("search", "", type=str).strip()
+
+    query = User.query.filter_by(organization_id=org.id, is_active=True)
+    if search:
+        like = f"%{search}%"
+        query = query.filter((User.full_name.ilike(like)) | (User.email.ilike(like)))
+
+    total = query.count()
+    users = query.offset((page - 1) * page_size).limit(page_size).all()
     
-    return jsonify([u.to_dict() for u in users])
+    return jsonify(paginate_response([u.to_dict() for u in users], total, page, page_size))
 
 
 @organizations_bp.route("/organizations/<uuid:org_id>/stats", methods=["GET"])
 @swag_from({
     "tags": ["Organizations"],
-    "summary": "Organizasyon istatistikleri"
+    "summary": "Organizasyon istatistikleri",
+    "parameters": [
+        {
+            "name": "org_id",
+            "in": "path",
+            "type": "string",
+            "required": True,
+            "description": "Organizasyon UUID"
+        }
+    ],
+    "responses": {
+        200: {"description": "Özet istatistikler"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Organizasyon bulunamadı"}
+    }
 })
 def get_organization_stats(org_id):
     """Organizasyonun özet istatistiklerini getir."""
