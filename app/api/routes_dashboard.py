@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, current_app
 from flasgger import swag_from
 from sqlalchemy import func, text
+
 from app.auth import requires_auth
 from app.api.helpers import get_current_user
 from app.extensions import db
@@ -11,8 +12,6 @@ from app.models import (
     Wallet,
     WalletTransaction,
     Notification,
-    User,
-    DeviceTelemetry
 )
 
 bp = Blueprint('dashboard', __name__)
@@ -103,13 +102,14 @@ def _get_total_active_power(org_id):
     sql = text("""
         SELECT COALESCE(SUM(latest_power), 0)
         FROM (
-            SELECT DISTINCT ON (device_id) power_w as latest_power
+            SELECT DISTINCT ON (t.device_id) t.value AS latest_power
             FROM device_telemetry t
             JOIN smart_devices d ON d.id = t.device_id
-            WHERE d.organization_id = :org_id 
-              AND t.time > NOW() - INTERVAL '1 hour' -- Sadece son 1 saatte aktif olanlar
-            ORDER BY device_id, t.time DESC
-        ) as subquery
+            WHERE d.organization_id = :org_id
+              AND t.key = 'power_w'
+              AND t.time > NOW() - INTERVAL '1 hour'
+            ORDER BY t.device_id, t.time DESC
+        ) AS subquery
     """)
     result = db.session.execute(sql, {"org_id": org_id}).scalar()
     return float(result or 0)
@@ -122,10 +122,11 @@ def _get_daily_consumption(org_id, day_start):
     # Basitleştirilmiş: energy_total_kwh kümülatif artıyorsa max-min yapılabilir.
     # Şimdilik basitçe saatlik tüketimlerin toplamı varsayalım.
     sql = text("""
-        SELECT COALESCE(SUM(energy_total_kwh), 0)
+        SELECT COALESCE(SUM(t.value), 0)
         FROM device_telemetry t
         JOIN smart_devices d ON d.id = t.device_id
         WHERE d.organization_id = :org_id
+          AND t.key = 'energy_total_kwh'
           AND t.time >= :day_start
     """)
     result = db.session.execute(sql, {"org_id": org_id, "day_start": day_start}).scalar()
@@ -133,9 +134,11 @@ def _get_daily_consumption(org_id, day_start):
 
 def _get_average_market_price(day_start):
     """Bugünün ortalama elektrik fiyatı (TL)."""
-    avg = db.session.query(func.avg(MarketPrice.price))\
-        .filter(MarketPrice.time >= day_start, MarketPrice.market_type == 'PTF')\
+    avg = (
+        db.session.query(func.avg(MarketPrice.price))
+        .filter(MarketPrice.time >= day_start)
         .scalar()
+    )
     return float(avg or 0)
 
 def _get_grid_health_score(org_id):
@@ -150,7 +153,7 @@ def _get_online_device_count(org_id):
 
 def _get_market_status():
     """Şu anki piyasa durumu ve yapay zeka önerisi."""
-    now = datetime.now()
+    now = datetime.utcnow()
     
     # En son fiyatı bul
     latest = MarketPrice.query.filter(MarketPrice.time <= now)\
