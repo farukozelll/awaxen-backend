@@ -7,7 +7,7 @@ from typing import Any
 
 from flask_socketio import disconnect, emit, join_room, leave_room
 
-from . import socketio
+from app.extensions import socketio
 
 ROOM_PREFIX = "user:"
 

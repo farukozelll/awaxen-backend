@@ -4,16 +4,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from flask import g, request
 
-from .. import db
-from ..models import Site, User
-from ..auth import get_current_user_id
+from app.extensions import db
+from app.models import User, Organization
+from app.auth import get_current_user_id
 
-# Yapı: { site_id: { "data": {...}, "timestamp": 1701234567 } }
-weather_cache: Dict[int, Dict[str, Any]] = {}
+# Yapı: { org_id: { "data": {...}, "timestamp": 1701234567 } }
+weather_cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TIMEOUT = 900  # 15 Dakika (Saniye cinsinden)
 
 
-def get_or_create_user() -> Optional[User]:
+def get_current_user() -> Optional[User]:
     """Token'dan gelen kullanıcıyı DB'de bul veya oluştur."""
     auth0_id = get_current_user_id()
     if not auth0_id:
@@ -22,15 +22,30 @@ def get_or_create_user() -> Optional[User]:
     user = User.query.filter_by(auth0_id=auth0_id).first()
     if not user:
         token_info = g.current_user
+        
+        # Yeni kullanıcı için organizasyon oluştur
+        org = Organization(
+            name=f"{token_info.get('name', 'Yeni Kullanıcı')}'in Evi",
+            slug=f"user-{auth0_id[:8]}",
+            type="home",
+        )
+        db.session.add(org)
+        db.session.flush()
+        
         user = User(
+            organization_id=org.id,
             auth0_id=auth0_id,
             email=token_info.get("email", f"{auth0_id}@unknown.com"),
             full_name=token_info.get("name", "Yeni Kullanıcı"),
-            role="viewer",
+            role="admin",
         )
         db.session.add(user)
         db.session.commit()
     return user
+
+
+# Geriye uyumluluk için alias
+get_or_create_user = get_current_user
 
 
 def parse_iso_datetime(value: Optional[str]):
@@ -100,22 +115,15 @@ def parse_decimal(value: Optional[str]) -> Optional[float]:
     return None
 
 
-def resolve_site_coordinates(site: Site) -> Tuple[Optional[float], Optional[float]]:
-    lat = parse_decimal(site.latitude)
-    lon = parse_decimal(site.longitude)
+def resolve_organization_coordinates(org: Organization) -> Tuple[Optional[float], Optional[float]]:
+    """Organization'ın location JSONB'sinden koordinatları çıkar."""
+    if not org.location:
+        return None, None
+    
+    lat = org.location.get("latitude") or org.location.get("lat")
+    lon = org.location.get("longitude") or org.location.get("lon") or org.location.get("lng")
+    
     if lat is not None and lon is not None:
-        return lat, lon
-
-    if site.location:
-        tokens = [tok for tok in re.split(r"[;|,\s]+", site.location) if tok]
-        if len(tokens) >= 2:
-            lat_candidate = parse_decimal(tokens[0])
-            lon_candidate = parse_decimal(tokens[1])
-            if lat_candidate is not None and lon_candidate is not None:
-                if site.latitude is None or site.longitude is None:
-                    site.latitude = lat_candidate
-                    site.longitude = lon_candidate
-                    db.session.commit()
-                return lat_candidate, lon_candidate
-
+        return parse_decimal(str(lat)), parse_decimal(str(lon))
+    
     return None, None

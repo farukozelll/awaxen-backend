@@ -18,7 +18,44 @@ from ..services import (
 def get_market_prices():
     """
     Belirli bir gün için piyasa fiyatlarını getir.
-    Query params: date (YYYY-MM-DD)
+    ---
+    tags:
+      - Market
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: date
+        in: query
+        type: string
+        format: date
+        example: "2024-01-15"
+        description: Tarih (YYYY-MM-DD). Belirtilmezse bugün.
+    responses:
+      200:
+        description: Piyasa fiyatları
+        schema:
+          type: object
+          properties:
+            date:
+              type: string
+              format: date
+            prices:
+              type: array
+              items:
+                type: object
+                properties:
+                  hour:
+                    type: integer
+                  ptf:
+                    type: number
+                  smf:
+                    type: number
+                  currency:
+                    type: string
+      400:
+        description: Geçersiz tarih formatı
+      401:
+        description: Yetkisiz erişim
     """
     user = get_or_create_user()
     if not user:
@@ -45,7 +82,39 @@ def get_market_prices():
 @api_bp.route('/market-prices/current', methods=['GET'])
 @requires_auth
 def get_current_price():
-    """Şu anki saatin piyasa fiyatını getir."""
+    """
+    Şu anki saatin piyasa fiyatını getir.
+    ---
+    tags:
+      - Market
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Güncel piyasa fiyatı
+        schema:
+          type: object
+          properties:
+            hour:
+              type: integer
+              example: 14
+            ptf:
+              type: number
+              example: 3.45
+            smf:
+              type: number
+              example: 3.52
+            currency:
+              type: string
+              example: TRY/kWh
+            date:
+              type: string
+              format: date
+      401:
+        description: Yetkisiz erişim
+      404:
+        description: Bu saat için fiyat bulunamadı
+    """
     user = get_or_create_user()
     if not user:
         return jsonify({"error": "Kullanıcı bulunamadı"}), 401
@@ -62,7 +131,54 @@ def get_current_price():
 def import_market_prices():
     """
     EPİAŞ fiyatlarını içe aktar (Admin/Cron job için).
-    Body: {"prices": [{"date": "2024-01-15", "hour": 17, "ptf": 4500.5, "smf": 4600.2}, ...]}
+    ---
+    tags:
+      - Market
+    security:
+      - bearerAuth: []
+    consumes:
+      - application/json
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          required:
+            - prices
+          properties:
+            prices:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                    example: "2024-01-15"
+                  hour:
+                    type: integer
+                    example: 17
+                  ptf:
+                    type: number
+                    example: 3.45
+                  smf:
+                    type: number
+                    example: 3.52
+    responses:
+      201:
+        description: Fiyatlar kaydedildi
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            total_processed:
+              type: integer
+      400:
+        description: Fiyat verisi bulunamadı
+      401:
+        description: Yetkisiz erişim
     """
     user = get_or_create_user()
     if not user:

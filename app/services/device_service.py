@@ -1,91 +1,83 @@
-"""Device (Cihaz/Gateway) iş mantığı."""
+"""SmartDevice iş mantığı - v6.0."""
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+from uuid import UUID
 
-from .. import db
-from ..models import Device, Site
-from .helpers import _resolve_metadata
-
-
-def _get_device_for_user(device_id: int, user_id: int) -> Device:
-    """Kullanıcıya ait Device'ı getir."""
-    return (
-        Device.query.join(Site)
-        .filter(Device.id == device_id, Site.user_id == user_id)
-        .first()
-    )
+from app.extensions import db
+from app.models import SmartDevice
 
 
-def create_device_logic(user_id: int, data: Dict[str, Any]) -> Device:
-    """Yeni cihaz oluştur."""
+def get_device_for_org(device_id: UUID, organization_id: UUID) -> Optional[SmartDevice]:
+    """Organizasyona ait SmartDevice'ı getir."""
+    return SmartDevice.query.filter_by(
+        id=device_id,
+        organization_id=organization_id,
+        is_active=True
+    ).first()
+
+
+def create_device_logic(organization_id: UUID, data: Dict[str, Any]) -> SmartDevice:
+    """Yeni akıllı cihaz oluştur."""
     if not data:
-        raise ValueError("Cihaz verisi gereklidir.")
+        raise ValueError("Device data is required.")
 
-    site = Site.query.filter_by(id=data.get("site_id"), user_id=user_id).first()
-    if not site:
-        raise ValueError("Bu saha sizin değil veya bulunamadı.")
-
-    device = Device(
-        site_id=site.id,
-        serial_number=data.get("serial_number"),
+    device = SmartDevice(
+        organization_id=organization_id,
+        integration_id=data.get("integration_id"),
+        gateway_id=data.get("gateway_id"),
+        external_id=data.get("external_id"),
         name=data.get("name"),
+        device_type=data.get("device_type", "relay"),
+        brand=data.get("brand"),
         model=data.get("model"),
-        firmware_version=data.get("firmware_version"),
-        metadata_info=_resolve_metadata(data),
-        is_online=data.get("is_online", False),
+        is_sensor=data.get("is_sensor", False),
+        is_actuator=data.get("is_actuator", True),
+        settings=data.get("settings", {}),
     )
     db.session.add(device)
     db.session.commit()
     return device
 
 
-def update_device_logic(user_id: int, device_id: int, data: Dict[str, Any]) -> Device:
+def update_device_logic(organization_id: UUID, device_id: UUID, data: Dict[str, Any]) -> SmartDevice:
     """Cihaz bilgilerini güncelle."""
-    device = _get_device_for_user(device_id, user_id)
+    device = get_device_for_org(device_id, organization_id)
     if not device:
-        raise ValueError("Cihaz bulunamadı veya yetkiniz yok.")
+        raise ValueError("Device not found or access denied.")
 
     if not data:
         return device
 
     updatable_fields = (
         "name",
-        "serial_number",
+        "device_type",
+        "brand",
         "model",
-        "firmware_version",
-        "status",
-        "ip_address",
-        "mac_address",
+        "is_sensor",
+        "is_actuator",
     )
 
     for field in updatable_fields:
         if field in data and data[field] is not None:
             setattr(device, field, data[field])
 
-    if "last_seen" in data:
-        last_seen_val = data["last_seen"]
-        if isinstance(last_seen_val, str):
-            try:
-                last_seen_val = datetime.fromisoformat(last_seen_val.replace("Z", "+00:00"))
-            except ValueError:
-                last_seen_val = None
-        device.last_seen = last_seen_val
+    if "settings" in data:
+        device.settings = data["settings"]
 
     if "is_online" in data:
         device.is_online = bool(data["is_online"])
-
-    if "metadata" in data or "metadata_info" in data:
-        device.metadata_info = _resolve_metadata(data)
+        if device.is_online:
+            device.last_seen = datetime.utcnow()
 
     db.session.commit()
     return device
 
 
-def delete_device_logic(user_id: int, device_id: int) -> None:
-    """Cihazı sil."""
-    device = _get_device_for_user(device_id, user_id)
+def delete_device_logic(organization_id: UUID, device_id: UUID) -> None:
+    """Cihazı soft delete yap."""
+    device = get_device_for_org(device_id, organization_id)
     if not device:
-        raise ValueError("Cihaz bulunamadı veya yetkiniz yok.")
+        raise ValueError("Device not found or access denied.")
 
-    db.session.delete(device)
+    device.is_active = False
     db.session.commit()

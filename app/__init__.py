@@ -3,14 +3,10 @@ from typing import Optional
 
 from flask import Flask
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
 from flasgger import Swagger
-from flask_socketio import SocketIO
 
-db = SQLAlchemy()
-migrate = Migrate()
-socketio = SocketIO(cors_allowed_origins="*")
+# Extensions'dan import et (circular import önleme)
+from .extensions import db, migrate, socketio, celery, init_celery
 
 
 def _env_flag(value: Optional[str], default: bool = True) -> bool:
@@ -36,11 +32,19 @@ def create_app():
     )
 
     app.config.update(
+        # Database
         SQLALCHEMY_DATABASE_URI=os.getenv("DATABASE_URL"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        
+        # Celery
+        CELERY_BROKER_URL=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+        CELERY_RESULT_BACKEND=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
+        
+        # Swagger
         SWAGGER={
-            "title": "Awaxen Industrial API",
+            "title": "Awaxen IoT Platform API v6.0",
             "uiversion": 3,
+            "description": "Hibrit Enerji Yönetim Platformu - SaaS Backend",
             "securityDefinitions": {
                 "bearerAuth": {
                     "type": "apiKey",
@@ -51,6 +55,8 @@ def create_app():
             },
             "security": [{"bearerAuth": []}],
         },
+        
+        # MQTT
         MQTT_BROKER_URL=os.getenv("MQTT_BROKER_URL"),
         MQTT_BROKER_PORT=int(os.getenv("MQTT_BROKER_PORT", "1883")),
         MQTT_USERNAME=os.getenv("MQTT_USERNAME"),
@@ -66,12 +72,20 @@ def create_app():
     Swagger(app)
 
     # Modelleri içeri aktar ve tabloları oluştur
-    from .models import User, Site, Device, Node, Telemetry, Command, SensorData  # noqa: F401
+    from .models import (  # noqa: F401
+        # v6.0 SaaS Core
+        Organization, User, Gateway, Integration,
+        # v6.0 Devices & Assets
+        SmartDevice, SmartAsset, DeviceTelemetry,
+        # v6.0 Automation & Economy
+        MarketPrice, Automation, AutomationLog, Notification,
+        # VPP
+        VppRule,
+    )
 
     with app.app_context():
         db.create_all()
-        print("Tablolar kontrol edildi ve oluşturuldu.")
-        _seed_initial_data()
+        print("v6.0 Tablolar kontrol edildi ve oluşturuldu.")
 
     # Rotaları kaydet (Modüler Blueprint yapısı)
     from .api import api_bp
@@ -100,55 +114,32 @@ def create_app():
 
 
 def _seed_initial_data() -> None:
-    """Development convenience: populate sample user/site/device data once."""
-
-    from .models import User, Site, Device, Node, Telemetry
+    """Development convenience: populate sample organization/user data once."""
+    from .models import Organization, User
 
     existing_user = User.query.filter_by(auth0_id="google-oauth2|114543030408234531565").first()
     if existing_user:
         return
 
+    # Demo organizasyon oluştur
+    org = Organization(
+        name="Awaxen Demo",
+        slug="awaxen-demo",
+        type="home",
+        timezone="Europe/Istanbul",
+    )
+    db.session.add(org)
+    db.session.flush()
+
+    # Demo kullanıcı oluştur
     user = User(
+        organization_id=org.id,
         auth0_id="google-oauth2|114543030408234531565",
         email="awaxenofficial@gmail.com",
         full_name="Awaxen Official",
         role="admin",
     )
     db.session.add(user)
-    db.session.flush()
-
-    site = Site(name="Kayseri VPP Sahası", city="Kayseri", location="38.72, 35.48", owner=user)
-    db.session.add(site)
-    db.session.flush()
-
-    device = Device(
-        site=site,
-        serial_number="AWX-CORE-0001",
-        name="Core Lite Pano",
-        is_online=True,
-    )
-    db.session.add(device)
-    db.session.flush()
-
-    node_inverter = Node(
-        device=device,
-        name="Solar Inverter",
-        node_type="INVERTER",
-        configuration={"protocol": "modbus", "address": 1},
-    )
-    node_pump = Node(
-        device=device,
-        name="Serpme Pompa",
-        node_type="ACTUATOR",
-        configuration={"type": "gpio", "pin": 17},
-    )
-    db.session.add_all([node_inverter, node_pump])
-    db.session.flush()
-
-    sample_telemetry = [
-        Telemetry(node_id=node_inverter.id, key="active_power", value=3250.0),
-        Telemetry(node_id=node_inverter.id, key="dc_voltage", value=820.5),
-        Telemetry(node_id=node_pump.id, key="flow_rate", value=12.4),
-    ]
-    db.session.add_all(sample_telemetry)
     db.session.commit()
+    
+    print("Demo veriler oluşturuldu: Organization + User")

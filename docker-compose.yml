@@ -1,4 +1,5 @@
-# Docker Compose dosyası - Awaxen Backend Stack
+# Docker Compose dosyası - Awaxen Backend Stack v6.0
+# Celery + Redis + TimescaleDB + MQTT
 
 services:
   # --- 1. VERİTABANI SERVİSİ (TimescaleDB) ---
@@ -6,42 +7,115 @@ services:
     image: timescale/timescaledb:latest-pg14
     container_name: awaxen_timescale
     environment:
-      POSTGRES_USER: ${DB_USER}         # .env dosyasından okur
-      POSTGRES_PASSWORD: ${DB_PASSWORD} # .env dosyasından okur
-      POSTGRES_DB: ${DB_NAME}           # .env dosyasından okur
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     ports:
-      - "5432:5432"  # Windows'tan erişmek istersen diye kapı açtık
+      - "5432:5432"
     volumes:
-      - timescaledb_data:/var/lib/postgresql/data  # Veriler silinmesin diye sakla
+      - timescaledb_data:/var/lib/postgresql/data
     restart: always
+    networks:
+      - awaxen_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # --- 2. BACKEND SERVİSİ (Flask) ---
+  # --- 2. REDIS (Mesaj Kuyruğu & Cache) ---
+  # Celery broker ve result backend olarak kullanılır
+  redis:
+    image: redis:alpine
+    container_name: awaxen_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - awaxen_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- 3. BACKEND API (Flask) ---
   backend:
-    build: .  # Dockerfile'ı kullanarak bu klasörü inşa et
+    build: .
     container_name: awaxen_backend
+    command: python run.py
     ports:
       - "5000:5000"
     volumes:
-      - .:/app  # Windows'taki kod değişimini anında içeri yansıt (Hot Reload)
-    environment:
-      # Backend'in DB'yi bulması için gereken adres
+      - .:/app
+    environment: &backend_env
+      # Database
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      MQTT_BROKER_URL: ${MQTT_BROKER_URL}
-      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT}
+      # Celery
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # MQTT
+      MQTT_BROKER_URL: mqtt
+      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT:-1883}
       MQTT_USERNAME: ${MQTT_USERNAME}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
-      MQTT_SENSOR_TOPIC: ${MQTT_SENSOR_TOPIC}
-      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID}
-      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
-      # Auth0 ayarları
+      MQTT_SENSOR_TOPIC: ${MQTT_SENSOR_TOPIC:-awaxen/sensors/#}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-awaxen-backend}
+      # Auth0
       AUTH0_DOMAIN: ${AUTH0_DOMAIN}
       AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      # Encryption (Token güvenliği için)
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      # External APIs
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      # Flask
+      FLASK_DEBUG: ${FLASK_DEBUG:-false}
     depends_on:
-      - db  # DB açılmadan Backend çalışmasın
-      - mqtt
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
     restart: always
+    networks:
+      - awaxen_net
 
-  # --- 3. MQTT Broker (Mosquitto) ---
+  # --- 4. CELERY WORKER (İşçiler) ---
+  # Arka plan görevlerini çalıştırır: Shelly API, EPİAŞ, Otomasyon
+  celery_worker:
+    build: .
+    container_name: awaxen_worker
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    volumes:
+      - .:/app
+    environment: *backend_env
+    depends_on:
+      - backend
+      - redis
+    restart: always
+    networks:
+      - awaxen_net
+
+  # --- 5. CELERY BEAT (Zamanlayıcı) ---
+  # Periyodik görevleri tetikler: "Her saat EPİAŞ fiyatlarını çek"
+  celery_beat:
+    build: .
+    container_name: awaxen_beat
+    command: celery -A app.celery_app beat --loglevel=info
+    volumes:
+      - .:/app
+    environment: *backend_env
+    depends_on:
+      - backend
+      - redis
+    restart: always
+    networks:
+      - awaxen_net
+
+  # --- 6. MQTT Broker (Mosquitto) ---
   mqtt:
     image: eclipse-mosquitto:2
     container_name: awaxen_mqtt
@@ -53,19 +127,28 @@ services:
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
     restart: always
+    networks:
+      - awaxen_net
 
-  # --- 4. PGADMIN (Veritabanı Yönetim Arayüzü) ---
+  # --- 7. PGADMIN (Veritabanı Yönetim Arayüzü) ---
   pgadmin:
     image: dpage/pgadmin4
     container_name: awaxen_pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@awaxen.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@awaxen.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASS:-admin}
     ports:
       - "5050:80"
     depends_on:
       - db
     restart: always
+    networks:
+      - awaxen_net
 
 volumes:
   timescaledb_data:
+  redis_data:
+
+networks:
+  awaxen_net:
+    driver: bridge

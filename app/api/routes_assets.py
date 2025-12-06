@@ -1,114 +1,119 @@
-"""Asset (Envanter/Sensör) yönetimi endpoint'leri."""
+"""SmartAsset (Varlık) yönetimi endpoint'leri - v6.0."""
 from flask import jsonify, request
 
 from . import api_bp
-from .helpers import (
-    get_or_create_user,
-    get_pagination_params,
-    get_filter_params,
-    paginate_response,
-    apply_sorting,
-)
-from .. import db
-from ..models import Asset, Device, Node, Site
-from ..auth import requires_auth
-from ..services import (
-    create_asset_logic,
-    update_asset_logic,
-    delete_asset_logic,
-    get_assets_by_node,
-    get_assets_by_site,
-)
+from .helpers import get_current_user, get_pagination_params, get_filter_params, paginate_response, apply_sorting
+from app.models import SmartAsset, SmartDevice
+from app.extensions import db
+from app.auth import requires_auth
 
 
 @api_bp.route('/assets', methods=['GET'])
 @requires_auth
 def get_all_assets():
     """
-    Kullanıcının tüm asset'lerini getir (pagination + filtreleme).
+    Organizasyonun tüm varlıklarını listele.
     ---
     tags:
-      - Asset
+      - Assets
     security:
       - bearerAuth: []
     parameters:
-      - in: query
-        name: page
-        schema:
-          type: integer
-          default: 1
-      - in: query
-        name: pageSize
-        schema:
-          type: integer
-          default: 20
-      - in: query
-        name: search
-        schema:
-          type: string
-        description: İsim veya variable_name içinde arama
-      - in: query
-        name: asset_type
-        schema:
-          type: string
-        description: Asset tipine göre filtrele (SENSOR, ACTUATOR, vb.)
-      - in: query
-        name: category
-        schema:
-          type: string
-        description: Kategoriye göre filtrele (TEMPERATURE, HUMIDITY, vb.)
+      - name: page
+        in: query
+        type: integer
+        default: 1
+        description: Sayfa numarası
+      - name: pageSize
+        in: query
+        type: integer
+        default: 20
+        description: Sayfa başına kayıt (max 100)
+      - name: search
+        in: query
+        type: string
+        description: İsimde arama
+      - name: sortBy
+        in: query
+        type: string
+        enum: [name, type, priority, nominal_power_watt, created_at]
+        default: created_at
+        description: Sıralama alanı
+      - name: sortOrder
+        in: query
+        type: string
+        enum: [asc, desc]
+        default: desc
+        description: Sıralama yönü
+      - name: type
+        in: query
+        type: string
+        enum: [hvac, ev_charger, heater, water_heater, pool_pump, lighting, appliance, other]
+        description: Varlık tipine göre filtrele
+      - name: device_id
+        in: query
+        type: string
+        format: uuid
+        description: Bağlı cihaza göre filtrele
     responses:
       200:
-        description: Asset listesi (paginated)
+        description: Varlık listesi
+        schema:
+          type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/definitions/SmartAsset'
+            pagination:
+              $ref: '#/definitions/Pagination'
+      401:
+        description: Yetkisiz erişim
+    definitions:
+      SmartAsset:
+        type: object
+        properties:
+          id:
+            type: string
+            format: uuid
+          name:
+            type: string
+          type:
+            type: string
+          device_id:
+            type: string
+            format: uuid
+          nominal_power_watt:
+            type: integer
+          priority:
+            type: integer
+          settings:
+            type: object
+          is_active:
+            type: boolean
+          created_at:
+            type: string
+            format: date-time
     """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
     page, page_size = get_pagination_params()
-    filters = get_filter_params()
+    asset_type = request.args.get('type')
 
-    user_site_ids = [s.id for s in user.sites]
-
-    query = (
-        Asset.query
-        .join(Node)
-        .join(Device)
-        .filter(Device.site_id.in_(user_site_ids))
+    query = SmartAsset.query.filter_by(
+        organization_id=user.organization_id,
+        is_active=True
     )
-
-    if filters["search"]:
-        search_term = f"%{filters['search']}%"
-        query = query.filter(
-            db.or_(
-                Asset.name.ilike(search_term),
-                Asset.variable_name.ilike(search_term),
-            )
-        )
-
-    asset_type = request.args.get("asset_type")
+    
     if asset_type:
-        query = query.filter(Asset.asset_type == asset_type)
-
-    category = request.args.get("category")
-    if category:
-        query = query.filter(Asset.category == category)
-
-    allowed_sort = ["id", "name", "asset_type", "category", "created_at"]
-    query = apply_sorting(query, Asset, filters["sort_by"], filters["sort_order"], allowed_sort)
+        query = query.filter_by(type=asset_type)
 
     total = query.count()
-    assets_page = query.offset((page - 1) * page_size).limit(page_size).all()
+    assets = query.offset((page - 1) * page_size).limit(page_size).all()
 
-    items = []
-    for asset in assets_page:
-        asset_dict = asset.to_dict()
-        asset_dict["node_name"] = asset.node.name
-        asset_dict["device_name"] = asset.node.device.name
-        asset_dict["device_serial"] = asset.node.device.serial_number
-        asset_dict["site_name"] = asset.node.device.site.name
-        items.append(asset_dict)
-
+    items = [a.to_dict() for a in assets]
     return jsonify(paginate_response(items, total, page, page_size))
 
 
@@ -116,280 +121,236 @@ def get_all_assets():
 @requires_auth
 def create_asset():
     """
-    Bir Node'a yeni asset (sensör/vana) tanımla.
+    Yeni varlık oluştur.
     ---
     tags:
-      - Asset
+      - Assets
+    security:
+      - bearerAuth: []
     consumes:
       - application/json
     parameters:
-      - in: body
-        name: asset
+      - name: body
+        in: body
+        required: true
         schema:
           type: object
           required:
-            - node_id
             - name
-            - variable_name
+            - type
           properties:
-            node_id:
-              type: integer
-              example: 1
             name:
               type: string
-              example: Domates Nem Sensörü
-            description:
+              example: Salon Kliması
+              description: Varlık adı
+            type:
               type: string
-              example: Sıra 1'deki toprak nem sensörü
-            asset_type:
+              enum: [hvac, ev_charger, heater, water_heater, pool_pump, lighting, appliance, other]
+              example: hvac
+              description: Varlık tipi
+            device_id:
               type: string
-              enum: [SENSOR, ACTUATOR, METER, CONTROLLER]
-              example: SENSOR
-            category:
-              type: string
-              example: SOIL_MOISTURE
-            variable_name:
-              type: string
-              example: soil_moisture_1
-            port_number:
+              format: uuid
+              example: 550e8400-e29b-41d4-a716-446655440000
+              description: Bağlı cihaz UUID (opsiyonel)
+            nominal_power_watt:
+              type: integer
+              example: 2500
+              description: Nominal güç (Watt)
+            priority:
               type: integer
               example: 1
-            unit:
-              type: string
-              example: "%"
-            min_value:
-              type: number
-              example: 0
-            max_value:
-              type: number
-              example: 100
-            calibration_offset:
-              type: number
-              example: 0
-            position:
+              minimum: 1
+              maximum: 10
+              description: Öncelik (1=en yüksek)
+            settings:
               type: object
-              example: {"row": 1, "column": 3}
-            configuration:
-              type: object
-              example: {"alarm_low": 20, "alarm_high": 80}
+              example: {"min_temp": 18, "max_temp": 26}
+              description: Ek ayarlar (JSONB)
     responses:
       201:
-        description: Asset oluşturuldu
-      400:
-        description: Validasyon hatası
-    """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
-
-    try:
-        asset = create_asset_logic(user.id, request.json)
-        return jsonify({
-            "message": "Asset oluşturuldu",
-            "asset_id": asset.id,
-            "asset": asset.to_dict()
-        }), 201
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-
-@api_bp.route('/assets/<int:asset_id>', methods=['GET'])
-@requires_auth
-def get_asset_detail(asset_id):
-    """
-    Tek bir asset'in detaylarını getir.
-    ---
-    tags:
-      - Asset
-    parameters:
-      - in: path
-        name: asset_id
-        required: true
-        schema:
-          type: integer
-    responses:
-      200:
-        description: Asset detayları
-      404:
-        description: Asset bulunamadı
-    """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
-
-    asset = (
-        Asset.query
-        .join(Node)
-        .join(Device)
-        .join(Site)
-        .filter(Asset.id == asset_id, Site.user_id == user.id)
-        .first()
-    )
-
-    if not asset:
-        return jsonify({"error": "Asset bulunamadı"}), 404
-
-    asset_dict = asset.to_dict()
-    asset_dict["node_name"] = asset.node.name
-    asset_dict["device_name"] = asset.node.device.name
-    asset_dict["device_serial"] = asset.node.device.serial_number
-    asset_dict["site_name"] = asset.node.device.site.name
-    asset_dict["site_id"] = asset.node.device.site.id
-
-    return jsonify(asset_dict)
-
-
-@api_bp.route('/assets/<int:asset_id>', methods=['PUT'])
-@requires_auth
-def update_asset(asset_id):
-    """
-    Asset bilgilerini güncelle.
-    ---
-    tags:
-      - Asset
-    parameters:
-      - in: path
-        name: asset_id
-        required: true
-        schema:
-          type: integer
-      - in: body
-        name: payload
+        description: Varlık oluşturuldu
         schema:
           type: object
           properties:
-            name:
+            message:
               type: string
-            description:
-              type: string
-            asset_type:
-              type: string
-            category:
-              type: string
-            variable_name:
-              type: string
-            unit:
-              type: string
-            min_value:
-              type: number
-            max_value:
-              type: number
-            calibration_offset:
-              type: number
-            position:
-              type: object
-            configuration:
-              type: object
-            is_active:
-              type: boolean
-    responses:
-      200:
-        description: Asset güncellendi
+              example: Asset created
+            asset:
+              $ref: '#/definitions/SmartAsset'
+      400:
+        description: Validasyon hatası
+      401:
+        description: Yetkisiz erişim
       404:
-        description: Asset bulunamadı
+        description: Bağlı cihaz bulunamadı
     """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
-    try:
-        asset = update_asset_logic(user.id, asset_id, request.json)
-        return jsonify({
-            "message": "Asset güncellendi",
-            "asset": asset.to_dict()
-        })
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    data = request.get_json()
+    
+    if not data.get("name"):
+        return jsonify({"error": "Name is required"}), 400
+    if not data.get("type"):
+        return jsonify({"error": "Type is required"}), 400
+
+    # Device kontrolü
+    device_id = data.get("device_id")
+    if device_id:
+        device = SmartDevice.query.filter_by(
+            id=device_id,
+            organization_id=user.organization_id
+        ).first()
+        if not device:
+            return jsonify({"error": "Device not found"}), 404
+
+    asset = SmartAsset(
+        organization_id=user.organization_id,
+        device_id=device_id,
+        name=data["name"],
+        type=data["type"],
+        nominal_power_watt=data.get("nominal_power_watt", 0),
+        priority=data.get("priority", 1),
+        settings=data.get("settings", {})
+    )
+    
+    db.session.add(asset)
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Asset created",
+        "asset": asset.to_dict()
+    }), 201
 
 
-@api_bp.route('/assets/<int:asset_id>', methods=['DELETE'])
+@api_bp.route('/assets/<uuid:asset_id>', methods=['GET'])
 @requires_auth
-def delete_asset(asset_id):
+def get_asset_detail(asset_id):
     """
-    Asset'i sil.
+    Tek bir varlığın detaylarını getir.
     ---
     tags:
-      - Asset
+      - Assets
     parameters:
       - in: path
         name: asset_id
         required: true
         schema:
-          type: integer
+          type: string
+          format: uuid
     responses:
       200:
-        description: Asset silindi
+        description: Varlık detayları
       404:
-        description: Asset bulunamadı
+        description: Varlık bulunamadı
     """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
-    try:
-        delete_asset_logic(user.id, asset_id)
-        return jsonify({"message": "Asset silindi"})
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    asset = SmartAsset.query.filter_by(
+        id=asset_id,
+        organization_id=user.organization_id
+    ).first()
+
+    if not asset:
+        return jsonify({"error": "Asset not found"}), 404
+
+    return jsonify(asset.to_dict())
 
 
-@api_bp.route('/nodes/<int:node_id>/assets', methods=['GET'])
+@api_bp.route('/assets/<uuid:asset_id>', methods=['PUT'])
 @requires_auth
-def get_node_assets(node_id):
+def update_asset(asset_id):
     """
-    Bir Node'a ait tüm asset'leri listele.
+    Varlık bilgilerini güncelle.
     ---
     tags:
-      - Asset
+      - Assets
     parameters:
       - in: path
-        name: node_id
+        name: asset_id
         required: true
         schema:
-          type: integer
+          type: string
+          format: uuid
     responses:
       200:
-        description: Node'a ait asset listesi
+        description: Varlık güncellendi
       404:
-        description: Node bulunamadı
+        description: Varlık bulunamadı
     """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
-    try:
-        assets = get_assets_by_node(user.id, node_id)
-        return jsonify([asset.to_dict() for asset in assets])
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    asset = SmartAsset.query.filter_by(
+        id=asset_id,
+        organization_id=user.organization_id
+    ).first()
+
+    if not asset:
+        return jsonify({"error": "Asset not found"}), 404
+
+    data = request.get_json() or {}
+    
+    if "name" in data:
+        asset.name = data["name"]
+    if "type" in data:
+        asset.type = data["type"]
+    if "nominal_power_watt" in data:
+        asset.nominal_power_watt = data["nominal_power_watt"]
+    if "priority" in data:
+        asset.priority = data["priority"]
+    if "settings" in data:
+        asset.settings = data["settings"]
+    if "device_id" in data:
+        asset.device_id = data["device_id"]
+    
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Asset updated",
+        "asset": asset.to_dict()
+    })
 
 
-@api_bp.route('/sites/<int:site_id>/assets', methods=['GET'])
+@api_bp.route('/assets/<uuid:asset_id>', methods=['DELETE'])
 @requires_auth
-def get_site_assets(site_id):
+def delete_asset(asset_id):
     """
-    Bir Site'a ait tüm asset'leri listele (hiyerarşik bilgiyle).
+    Varlığı sil (soft delete).
     ---
     tags:
-      - Asset
+      - Assets
     parameters:
       - in: path
-        name: site_id
+        name: asset_id
         required: true
         schema:
-          type: integer
+          type: string
+          format: uuid
     responses:
       200:
-        description: Site'a ait asset listesi
+        description: Varlık silindi
       404:
-        description: Site bulunamadı
+        description: Varlık bulunamadı
     """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
-    try:
-        assets = get_assets_by_site(user.id, site_id)
-        return jsonify(assets)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 404
+    asset = SmartAsset.query.filter_by(
+        id=asset_id,
+        organization_id=user.organization_id
+    ).first()
+
+    if not asset:
+        return jsonify({"error": "Asset not found"}), 404
+
+    asset.is_active = False
+    db.session.commit()
+    
+    return jsonify({"message": "Asset deleted"})

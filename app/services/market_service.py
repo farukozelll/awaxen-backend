@@ -1,38 +1,41 @@
-"""Enerji piyasası fiyatları (EPİAŞ) iş mantığı."""
-from datetime import date, datetime
+"""Enerji piyasası fiyatları (EPİAŞ) iş mantığı - v6.0."""
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from .. import db
-from ..models import EnergyMarketPrice
+from app.extensions import db
+from app.models import MarketPrice
 
 
 def save_market_prices(prices: List[Dict[str, Any]]) -> int:
-    """EPİAŞ'tan çekilen fiyatları kaydet."""
+    """
+    EPİAŞ'tan çekilen fiyatları kaydet.
+    
+    Yeni format: time (timestamp), price (TL/kWh), ptf, smf
+    """
     saved_count = 0
 
     for price_data in prices:
-        price_date = price_data.get("date")
-        hour = price_data.get("hour")
-
-        if isinstance(price_date, str):
-            price_date = datetime.strptime(price_date, "%Y-%m-%d").date()
-
-        # Upsert mantığı
-        existing = EnergyMarketPrice.query.filter_by(date=price_date, hour=hour).first()
+        price_time = price_data.get("time")
+        
+        # String ise datetime'a çevir
+        if isinstance(price_time, str):
+            price_time = datetime.fromisoformat(price_time.replace("Z", "+00:00"))
+        
+        # Upsert mantığı (time primary key)
+        existing = MarketPrice.query.filter_by(time=price_time).first()
 
         if existing:
+            existing.price = price_data.get("price")
             existing.ptf = price_data.get("ptf")
             existing.smf = price_data.get("smf")
-            existing.positive_imbalance = price_data.get("positive_imbalance")
-            existing.negative_imbalance = price_data.get("negative_imbalance")
         else:
-            new_price = EnergyMarketPrice(
-                date=price_date,
-                hour=hour,
+            new_price = MarketPrice(
+                time=price_time,
+                price=price_data.get("price"),
                 ptf=price_data.get("ptf"),
                 smf=price_data.get("smf"),
-                positive_imbalance=price_data.get("positive_imbalance"),
-                negative_imbalance=price_data.get("negative_imbalance"),
+                currency=price_data.get("currency", "TRY"),
+                region=price_data.get("region", "TR"),
             )
             db.session.add(new_price)
             saved_count += 1
@@ -43,12 +46,28 @@ def save_market_prices(prices: List[Dict[str, Any]]) -> int:
 
 def get_market_prices_for_date(target_date: date) -> List[Dict[str, Any]]:
     """Belirli bir gün için piyasa fiyatlarını getir."""
-    prices = EnergyMarketPrice.query.filter_by(date=target_date).order_by(EnergyMarketPrice.hour).all()
+    start = datetime.combine(target_date, datetime.min.time())
+    end = start + timedelta(days=1)
+    
+    prices = MarketPrice.query.filter(
+        MarketPrice.time >= start,
+        MarketPrice.time < end
+    ).order_by(MarketPrice.time).all()
+    
     return [p.to_dict() for p in prices]
 
 
 def get_current_market_price() -> Optional[Dict[str, Any]]:
     """Şu anki saatin piyasa fiyatını getir."""
-    now = datetime.now()
-    price = EnergyMarketPrice.query.filter_by(date=now.date(), hour=now.hour).first()
+    now = datetime.utcnow()
+    # Bu saatin başlangıcı
+    hour_start = now.replace(minute=0, second=0, microsecond=0)
+    
+    price = MarketPrice.query.filter_by(time=hour_start).first()
     return price.to_dict() if price else None
+
+
+def get_latest_price() -> Optional[float]:
+    """En son fiyatı getir (TL/kWh)."""
+    price = MarketPrice.query.order_by(MarketPrice.time.desc()).first()
+    return price.price if price else None

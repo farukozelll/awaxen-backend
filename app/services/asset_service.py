@@ -1,140 +1,80 @@
-"""Asset (Envanter/Sensör) iş mantığı."""
-from typing import Any, Dict, List
+"""SmartAsset iş mantığı - v6.0."""
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
-from .. import db
-from ..models import Asset, AssetCategory, AssetType, Device, Node, Site
-from .node_service import _get_node_for_user
-
-
-def _get_asset_for_user(asset_id: int, user_id: int) -> Asset:
-    """Kullanıcıya ait Asset'i getir."""
-    return (
-        Asset.query.join(Node)
-        .join(Device)
-        .join(Site)
-        .filter(Asset.id == asset_id, Site.user_id == user_id)
-        .first()
-    )
+from app.extensions import db
+from app.models import SmartAsset
 
 
-def create_asset_logic(user_id: int, data: Dict[str, Any]) -> Asset:
-    """Bir Node'a sensör/vana (inventory) tanımla."""
+def get_asset_for_org(asset_id: UUID, organization_id: UUID) -> Optional[SmartAsset]:
+    """Organizasyona ait SmartAsset'i getir."""
+    return SmartAsset.query.filter_by(
+        id=asset_id,
+        organization_id=organization_id,
+        is_active=True
+    ).first()
+
+
+def create_asset_logic(organization_id: UUID, data: Dict[str, Any]) -> SmartAsset:
+    """Yeni varlık oluştur."""
     if not data:
-        raise ValueError("Asset verisi gereklidir.")
-
-    node = _get_node_for_user(data.get("node_id"), user_id)
-    if not node:
-        raise ValueError("Node bulunamadı veya yetkiniz yok.")
-
-    variable_name = data.get("variable_name")
-    if not variable_name:
-        raise ValueError("variable_name (MQTT key) zorunludur.")
+        raise ValueError("Asset data is required.")
 
     name = data.get("name")
     if not name:
-        raise ValueError("Asset adı zorunludur.")
+        raise ValueError("Asset name is required.")
 
-    asset = Asset(
-        node_id=node.id,
+    asset = SmartAsset(
+        organization_id=organization_id,
+        device_id=data.get("device_id"),
         name=name,
-        description=data.get("description"),
-        asset_type=data.get("asset_type", AssetType.SENSOR.value),
-        category=data.get("category", AssetCategory.OTHER.value),
-        variable_name=variable_name,
-        port_number=data.get("port_number"),
-        unit=data.get("unit"),
-        min_value=data.get("min_value"),
-        max_value=data.get("max_value"),
-        calibration_offset=data.get("calibration_offset", 0),
-        position=data.get("position", {}),
-        configuration=data.get("configuration", {}),
-        is_active=data.get("is_active", True),
+        type=data.get("type", "other"),
+        nominal_power_watt=data.get("nominal_power_watt", 0),
+        priority=data.get("priority", 1),
+        settings=data.get("settings", {}),
     )
     db.session.add(asset)
     db.session.commit()
     return asset
 
 
-def update_asset_logic(user_id: int, asset_id: int, data: Dict[str, Any]) -> Asset:
+def update_asset_logic(organization_id: UUID, asset_id: UUID, data: Dict[str, Any]) -> SmartAsset:
     """Asset bilgilerini güncelle."""
-    asset = _get_asset_for_user(asset_id, user_id)
+    asset = get_asset_for_org(asset_id, organization_id)
     if not asset:
-        raise ValueError("Asset bulunamadı veya yetkiniz yok.")
+        raise ValueError("Asset not found or access denied.")
 
     if not data:
         return asset
 
     updatable_fields = [
-        "name", "description", "asset_type", "category", "variable_name",
-        "port_number", "unit", "min_value", "max_value", "calibration_offset",
-        "position", "configuration", "is_active"
+        "name", "type", "nominal_power_watt", "priority", "device_id"
     ]
 
     for field in updatable_fields:
         if field in data:
             setattr(asset, field, data[field])
 
+    if "settings" in data:
+        asset.settings = data["settings"]
+
     db.session.commit()
     return asset
 
 
-def delete_asset_logic(user_id: int, asset_id: int) -> None:
-    """Asset'i sil."""
-    asset = _get_asset_for_user(asset_id, user_id)
+def delete_asset_logic(organization_id: UUID, asset_id: UUID) -> None:
+    """Asset'i soft delete yap."""
+    asset = get_asset_for_org(asset_id, organization_id)
     if not asset:
-        raise ValueError("Asset bulunamadı veya yetkiniz yok.")
+        raise ValueError("Asset not found or access denied.")
 
-    db.session.delete(asset)
+    asset.is_active = False
     db.session.commit()
 
 
-def get_assets_by_node(user_id: int, node_id: int) -> List[Asset]:
-    """Bir Node'a ait tüm asset'leri getir."""
-    node = _get_node_for_user(node_id, user_id)
-    if not node:
-        raise ValueError("Node bulunamadı veya yetkiniz yok.")
-
-    return Asset.query.filter_by(node_id=node_id).all()
-
-
-def get_assets_by_site(user_id: int, site_id: int) -> List[Dict[str, Any]]:
-    """Bir Site'a ait tüm asset'leri hiyerarşik olarak getir."""
-    site = Site.query.filter_by(id=site_id, user_id=user_id).first()
-    if not site:
-        raise ValueError("Saha bulunamadı veya yetkiniz yok.")
-
-    result = []
-    for device in site.devices:
-        for node in device.nodes:
-            for asset in node.assets:
-                result.append({
-                    **asset.to_dict(),
-                    "node_name": node.name,
-                    "device_name": device.name,
-                    "device_serial": device.serial_number,
-                })
-    return result
-
-
-def get_site_hierarchy(user_id: int, site_id: int) -> Dict[str, Any]:
-    """Site'ın tam hiyerarşisini getir (Device -> Node -> Asset)."""
-    site = Site.query.filter_by(id=site_id, user_id=user_id).first()
-    if not site:
-        raise ValueError("Saha bulunamadı veya yetkiniz yok.")
-
-    return {
-        **site.to_dict(),
-        "devices": [
-            {
-                **device.to_dict(),
-                "nodes": [
-                    {
-                        **node.to_dict(),
-                        "assets": [asset.to_dict() for asset in node.assets]
-                    }
-                    for node in device.nodes
-                ]
-            }
-            for device in site.devices
-        ]
-    }
+def get_assets_by_organization(organization_id: UUID) -> List[SmartAsset]:
+    """Organizasyona ait tüm asset'leri getir."""
+    return SmartAsset.query.filter_by(
+        organization_id=organization_id,
+        is_active=True
+    ).all()

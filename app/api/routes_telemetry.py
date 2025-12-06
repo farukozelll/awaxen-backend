@@ -1,17 +1,18 @@
-"""Telemetri endpoint'leri."""
+"""Telemetri endpoint'leri - v6.0 (TimescaleDB)."""
+from datetime import datetime, timedelta
 from flask import jsonify, request
 
 from . import api_bp
-from .helpers import get_or_create_user, parse_iso_datetime
-from .. import db
-from ..models import Device, Node, Site, Telemetry
-from ..auth import requires_auth
+from .helpers import get_current_user, parse_iso_datetime
+from app.extensions import db
+from app.models import SmartDevice, DeviceTelemetry
+from app.auth import requires_auth
 
 
 @api_bp.route('/telemetry', methods=['POST'])
 def receive_telemetry():
     """
-    Core cihazlardan telemetri verisini kaydet.
+    Cihazlardan telemetri verisini kaydet.
     ---
     tags:
       - Telemetry
@@ -24,44 +25,55 @@ def receive_telemetry():
         schema:
           type: object
           properties:
-            serial_number:
+            device_id:
               type: string
-              example: AWX-CORE-0001
-            node_name:
+              format: uuid
+            external_id:
               type: string
-              example: Solar Inverter
+              example: shellyplus1pm-abc123
             data:
               type: object
-              example: {"power": 4200.5, "voltage": 810}
+              example: {"power": 1200.5, "voltage": 220, "temperature": 35.2}
     responses:
       201:
         description: Telemetri kaydedildi
       404:
-        description: Cihaz veya node bulunamadı
+        description: Cihaz bulunamadı
     """
     try:
         payload = request.json
-
-        device = Device.query.filter_by(serial_number=payload['serial_number']).first()
+        
+        # device_id veya external_id ile cihaz bul
+        device = None
+        if payload.get('device_id'):
+            device = SmartDevice.query.filter_by(id=payload['device_id']).first()
+        elif payload.get('external_id'):
+            device = SmartDevice.query.filter_by(external_id=payload['external_id']).first()
+        
         if not device:
-            return jsonify({"error": "Cihaz bulunamadı"}), 404
+            return jsonify({"error": "Device not found"}), 404
 
-        node = Node.query.filter_by(device_id=device.id, name=payload['node_name']).first()
-        if not node:
-            return jsonify({"error": "Node tanimsiz"}), 404
+        data = payload.get('data', {})
+        
+        telemetry = DeviceTelemetry(
+            device_id=device.id,
+            power_w=data.get('power'),
+            voltage=data.get('voltage'),
+            current=data.get('current'),
+            energy_total_kwh=data.get('energy_total_kwh'),
+            temperature=data.get('temperature'),
+            humidity=data.get('humidity'),
+            raw_data=data,
+        )
+        db.session.add(telemetry)
 
-        for key, value in payload['data'].items():
-            new_telemetry = Telemetry(
-                node_id=node.id,
-                key=key,
-                value=float(value)
-            )
-            db.session.add(new_telemetry)
-
+        # Cihaz durumunu güncelle
         device.is_online = True
+        device.last_seen = datetime.utcnow()
+        
         db.session.commit()
 
-        return jsonify({"status": "success"}), 201
+        return jsonify({"status": "success", "device_id": str(device.id)}), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -71,16 +83,17 @@ def receive_telemetry():
 @requires_auth
 def get_telemetry_history():
     """
-    Bir node için tarih aralığındaki telemetri verilerini getir.
+    Bir cihaz için tarih aralığındaki telemetri verilerini getir.
     ---
     tags:
       - Telemetry
     parameters:
       - in: query
-        name: node_id
+        name: device_id
         required: true
         schema:
-          type: integer
+          type: string
+          format: uuid
       - in: query
         name: start_date
         required: false
@@ -93,41 +106,94 @@ def get_telemetry_history():
         schema:
           type: string
           format: date-time
+      - in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          default: 1000
     responses:
       200:
         description: Telemetri geçmişi
     """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
 
-    node_id = request.args.get('node_id', type=int)
-    if not node_id:
-        return jsonify({"error": "node_id zorunlu"}), 400
+    device_id = request.args.get('device_id')
+    if not device_id:
+        return jsonify({"error": "device_id is required"}), 400
 
-    node = Node.query.join(Device).join(Site).filter(
-        Node.id == node_id,
-        Site.user_id == user.id,
+    # Cihazın kullanıcının organizasyonuna ait olduğunu kontrol et
+    device = SmartDevice.query.filter_by(
+        id=device_id,
+        organization_id=user.organization_id
     ).first()
-    if not node:
-        return jsonify({"error": "Node bulunamadı"}), 404
+    
+    if not device:
+        return jsonify({"error": "Device not found"}), 404
 
     start = parse_iso_datetime(request.args.get('start_date'))
     end = parse_iso_datetime(request.args.get('end_date'))
+    limit = request.args.get('limit', 1000, type=int)
 
-    query = Telemetry.query.filter(Telemetry.node_id == node_id)
-    if start:
-        query = query.filter(Telemetry.time >= start)
-    if end:
-        query = query.filter(Telemetry.time <= end)
+    # Varsayılan: son 24 saat
+    if not start:
+        start = datetime.utcnow() - timedelta(hours=24)
+    if not end:
+        end = datetime.utcnow()
 
-    records = query.order_by(Telemetry.time.asc()).limit(5000).all()
+    query = DeviceTelemetry.query.filter(
+        DeviceTelemetry.device_id == device_id,
+        DeviceTelemetry.time >= start,
+        DeviceTelemetry.time <= end
+    )
 
-    return jsonify([
-        {
-            "time": rec.time.isoformat(),
-            "key": rec.key,
-            "value": rec.value,
-        }
-        for rec in records
-    ])
+    records = query.order_by(DeviceTelemetry.time.asc()).limit(limit).all()
+
+    return jsonify([r.to_dict() for r in records])
+
+
+@api_bp.route('/telemetry/latest', methods=['GET'])
+@requires_auth
+def get_latest_telemetry():
+    """
+    Bir cihazın en son telemetri verisini getir.
+    ---
+    tags:
+      - Telemetry
+    parameters:
+      - in: query
+        name: device_id
+        required: true
+        schema:
+          type: string
+          format: uuid
+    responses:
+      200:
+        description: En son telemetri verisi
+    """
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    device_id = request.args.get('device_id')
+    if not device_id:
+        return jsonify({"error": "device_id is required"}), 400
+
+    device = SmartDevice.query.filter_by(
+        id=device_id,
+        organization_id=user.organization_id
+    ).first()
+    
+    if not device:
+        return jsonify({"error": "Device not found"}), 404
+
+    latest = DeviceTelemetry.query.filter_by(
+        device_id=device_id
+    ).order_by(DeviceTelemetry.time.desc()).first()
+
+    if not latest:
+        return jsonify({"error": "No telemetry data found"}), 404
+
+    return jsonify(latest.to_dict())

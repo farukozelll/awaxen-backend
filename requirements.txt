@@ -1,13 +1,36 @@
+# Flask Core
 flask
 flask-cors
 flask-sqlalchemy
 flask-migrate
-psycopg2-binary
-python-dotenv
-PyJWT[crypto]
 flasgger
+
+# Database
+psycopg2-binary
+
+# Authentication
+PyJWT[crypto]
+
+# HTTP Client
 requests
+
+# WebSocket & Real-time
 flask-socketio
 gevent
 gevent-websocket
+
+# MQTT
 paho-mqtt
+
+# Celery (Async Tasks)
+celery[redis]
+redis
+
+# Encryption (Token Security)
+cryptography
+
+# Environment
+python-dotenv
+
+# Utilities
+python-slugify
