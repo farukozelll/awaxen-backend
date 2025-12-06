@@ -501,6 +501,94 @@ class AutomationLog(db.Model):
         }
 
 
+# ==========================================
+# 4.5 OYUNLAŞTIRMA (GAMIFICATION) KATMANI
+# ==========================================
+
+
+class Wallet(db.Model):
+    """
+    Kullanıcı Cüzdanı - Awaxen Coin (AWX) bakiyesi.
+    
+    Ledger mantığı: Bakiye her zaman transactions'dan hesaplanabilir.
+    """
+    __tablename__ = "wallets"
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey("users.id"), unique=True, nullable=False)
+    
+    balance = db.Column(db.Numeric(12, 2), default=0.0)  # Güncel bakiye
+    currency = db.Column(db.String(10), default="AWX")   # Awaxen Coin
+    
+    lifetime_earned = db.Column(db.Numeric(12, 2), default=0.0)   # Toplam kazanılan
+    lifetime_spent = db.Column(db.Numeric(12, 2), default=0.0)    # Toplam harcanan
+    
+    level = db.Column(db.Integer, default=1)             # Kullanıcı seviyesi
+    xp = db.Column(db.Integer, default=0)                # Deneyim puanı
+    
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # İlişkiler
+    user = db.relationship("User", backref=db.backref("wallet", uselist=False))
+    transactions = db.relationship("WalletTransaction", backref="wallet", lazy="dynamic")
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "user_id": str(self.user_id),
+            "balance": float(self.balance) if self.balance else 0.0,
+            "currency": self.currency,
+            "lifetime_earned": float(self.lifetime_earned) if self.lifetime_earned else 0.0,
+            "lifetime_spent": float(self.lifetime_spent) if self.lifetime_spent else 0.0,
+            "level": self.level,
+            "xp": self.xp,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class WalletTransaction(db.Model):
+    """
+    Cüzdan İşlem Geçmişi - Çift defter (Double Entry) mantığı.
+    
+    Her işlem burada kayıt altına alınır.
+    """
+    __tablename__ = "wallet_transactions"
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    wallet_id = db.Column(UUID(as_uuid=True), db.ForeignKey("wallets.id"), nullable=False)
+    
+    amount = db.Column(db.Numeric(12, 2), nullable=False)  # +10.00 veya -5.00
+    balance_after = db.Column(db.Numeric(12, 2))           # İşlem sonrası bakiye
+    
+    transaction_type = db.Column(db.String(30), nullable=False)  # reward, penalty, withdrawal, bonus, referral
+    category = db.Column(db.String(50))                          # energy_saving, automation, challenge, manual
+    
+    description = db.Column(db.String(255))
+    reference_id = db.Column(db.String(100))  # İlişkili kayıt ID (automation_id, challenge_id vb.)
+    reference_type = db.Column(db.String(50)) # automation, challenge, device, manual
+    
+    extra_data = db.Column(JSONB, default=dict)  # Ek bilgiler
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "wallet_id": str(self.wallet_id),
+            "amount": float(self.amount) if self.amount else 0.0,
+            "balance_after": float(self.balance_after) if self.balance_after else 0.0,
+            "transaction_type": self.transaction_type,
+            "category": self.category,
+            "description": self.description,
+            "reference_id": self.reference_id,
+            "reference_type": self.reference_type,
+            "extra_data": self.extra_data or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class VppRule(db.Model):
     """VPP Otomasyon Kuralları - İleri seviye enerji yönetimi."""
     __tablename__ = "vpp_rules"
@@ -570,17 +658,36 @@ class DeviceTelemetry(db.Model):
 
 
 class Notification(db.Model):
-    """Kullanıcı Bildirimleri - Telegram, Push, Email."""
+    """
+    Kullanıcı Bildirimleri - Telegram, Push, Email, In-App.
+    
+    Her bildirim hem veritabanına kaydedilir hem de ilgili kanaldan gönderilir.
+    """
     __tablename__ = "notifications"
 
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = db.Column(UUID(as_uuid=True), db.ForeignKey("users.id"), nullable=False)
+    organization_id = db.Column(UUID(as_uuid=True), db.ForeignKey("organizations.id"))
     
-    message = db.Column(db.Text, nullable=False)
     title = db.Column(db.String(200))
+    message = db.Column(db.Text, nullable=False)
     
-    channel = db.Column(db.String(20), default="telegram")
+    # Bildirim tipi: info, warning, error, success, price_alert, device_alert, automation
+    type = db.Column(db.String(30), default="info")
+    
+    # Kanal: in_app, telegram, email, push, sms
+    channel = db.Column(db.String(20), default="in_app")
+    
+    # Durum
     status = db.Column(db.String(20), default=NotificationStatus.PENDING.value)
+    is_read = db.Column(db.Boolean, default=False)
+    
+    # İlişkili kayıt (opsiyonel)
+    reference_id = db.Column(db.String(100))
+    reference_type = db.Column(db.String(50))  # device, automation, market, system
+    
+    # Ek veri
+    data = db.Column(JSONB, default=dict)
     
     sent_at = db.Column(db.DateTime)
     read_at = db.Column(db.DateTime)
@@ -592,10 +699,16 @@ class Notification(db.Model):
         return {
             "id": str(self.id),
             "user_id": str(self.user_id),
-            "message": self.message,
+            "organization_id": str(self.organization_id) if self.organization_id else None,
             "title": self.title,
+            "message": self.message,
+            "type": self.type,
             "channel": self.channel,
             "status": self.status,
+            "is_read": self.is_read,
+            "reference_id": self.reference_id,
+            "reference_type": self.reference_type,
+            "data": self.data or {},
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
             "read_at": self.read_at.isoformat() if self.read_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

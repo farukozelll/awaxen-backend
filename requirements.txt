@@ -34,3 +34,6 @@ python-dotenv
 
 # Utilities
 python-slugify
+
+# Development & Testing
+faker

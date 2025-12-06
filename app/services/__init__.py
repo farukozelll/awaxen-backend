@@ -31,6 +31,9 @@ from .asset_service import (
     get_assets_by_organization,
 )
 
+# EPİAŞ Entegrasyonu
+from .epias_service import EpiasService, epias_service
+
 __all__ = [
     # v6.0 Core
     "ShellyService",
@@ -54,4 +57,7 @@ __all__ = [
     "update_asset_logic",
     "delete_asset_logic",
     "get_assets_by_organization",
+    # EPİAŞ
+    "EpiasService",
+    "epias_service",
 ]

@@ -29,3 +29,5 @@ from . import routes_devices
 from . import routes_assets
 from . import routes_telemetry
 from . import routes_market
+from . import routes_wallet
+from . import routes_notifications
