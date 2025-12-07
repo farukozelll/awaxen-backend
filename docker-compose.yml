@@ -70,6 +70,9 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       # External APIs
       OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      # EPİAŞ (Enerji Piyasası)
+      EPIAS_USERNAME: ${EPIAS_USERNAME}
+      EPIAS_PASSWORD: ${EPIAS_PASSWORD}
       # Flask
       FLASK_DEBUG: ${FLASK_DEBUG:-false}
       # Telegram Bot

@@ -5,12 +5,20 @@ Dokümantasyon: https://seffaflik.epias.com.tr/electricity-service/technical/tr/
 
 TGT (Ticket Granting Ticket) ile kimlik doğrulama yapılır.
 TGT yaklaşık 2 saat geçerlidir.
+
+Özellikler:
+- PTF (Piyasa Takas Fiyatı) / MCP (Market Clearing Price)
+- SMF (Sistem Marjinal Fiyatı) / SMP (System Marginal Price)
+- Gerçek zamanlı tüketim verileri
+- Otomatik TGT yenileme
+- Redis cache desteği
+- Retry mekanizması
 """
 import os
+import logging
 import requests
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
-from flask import current_app
 
 # Redis cache için (opsiyonel)
 try:
@@ -18,6 +26,8 @@ try:
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 class EpiasService:
@@ -68,7 +78,7 @@ class EpiasService:
                 return cached_tgt
         
         if not self.username or not self.password:
-            current_app.logger.warning("EPİAŞ credentials not configured")
+            logger.warning("EPİAŞ credentials not configured (EPIAS_USERNAME/EPIAS_PASSWORD)")
             return None
         
         try:
@@ -82,19 +92,20 @@ class EpiasService:
                     "username": self.username,
                     "password": self.password,
                 },
-                timeout=10
+                timeout=15
             )
             
             if response.status_code != 201:
-                current_app.logger.error(f"EPİAŞ TGT alınamadı: {response.status_code}")
+                logger.error(f"EPİAŞ TGT alınamadı: {response.status_code} - {response.text[:200]}")
                 return None
             
             tgt = response.text.strip()
             self._cache_tgt(tgt)
+            logger.info("EPİAŞ TGT başarıyla alındı")
             return tgt
             
         except requests.exceptions.RequestException as e:
-            current_app.logger.error(f"EPİAŞ Auth Hatası: {str(e)}")
+            logger.error(f"EPİAŞ Auth Hatası: {str(e)}")
             return None
     
     def _get_cached_tgt(self) -> Optional[str]:
@@ -127,23 +138,52 @@ class EpiasService:
             except Exception:
                 pass
     
-    def get_mcp(self, date_obj: datetime = None) -> Optional[List[Dict[str, Any]]]:
+    def get_mcp(self, date_obj: datetime = None, retry_count: int = 2) -> Optional[List[Dict[str, Any]]]:
         """
         MCP (Market Clearing Price) / PTF (Piyasa Takas Fiyatı) verilerini çeker.
         
         Endpoint: POST /v1/markets/dam/data/mcp
+        
+        Args:
+            date_obj: Tarih (varsayılan: bugün)
+            retry_count: Hata durumunda tekrar deneme sayısı
+        
+        Returns:
+            Fiyat listesi veya None (hata durumunda)
         """
         if not date_obj:
             date_obj = datetime.now()
         
-        tgt = self.get_tgt()
-        if not tgt:
-            # TGT olmadan public endpoint dene
-            return self._get_mcp_public(date_obj)
-        
         date_str = date_obj.strftime("%Y-%m-%d")
-        url = f"{self.BASE_URL}/markets/dam/data/mcp"
         
+        # Önce TGT ile dene
+        tgt = self.get_tgt()
+        if tgt:
+            result = self._fetch_mcp_with_tgt(date_str, tgt)
+            if result is not None:
+                return result
+            # TGT geçersiz olabilir, yenile ve tekrar dene
+            tgt = self.get_tgt(force_refresh=True)
+            if tgt:
+                result = self._fetch_mcp_with_tgt(date_str, tgt)
+                if result is not None:
+                    return result
+        
+        # TGT başarısız, public endpoint dene
+        for attempt in range(retry_count + 1):
+            result = self._get_mcp_public(date_obj)
+            if result is not None:
+                return result
+            if attempt < retry_count:
+                import time
+                time.sleep(2 ** attempt)  # Exponential backoff
+        
+        logger.error(f"EPİAŞ MCP verisi alınamadı: {date_str}")
+        return None
+    
+    def _fetch_mcp_with_tgt(self, date_str: str, tgt: str) -> Optional[List[Dict[str, Any]]]:
+        """TGT ile MCP verisi çek."""
+        url = f"{self.BASE_URL}/markets/dam/data/mcp"
         headers = {**self.HEADERS, "TGT": tgt}
         payload = {
             "startDate": f"{date_str}T00:00:00+03:00",
@@ -151,17 +191,22 @@ class EpiasService:
         }
         
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=15)
+            response = requests.post(url, json=payload, headers=headers, timeout=20)
             response.raise_for_status()
             
             data = response.json()
             if "items" in data:
-                return self._normalize_mcp_data(data["items"])
+                items = self._normalize_mcp_data(data["items"])
+                logger.info(f"EPİAŞ MCP verisi alındı: {date_str} ({len(items)} kayıt)")
+                return items
             
             return []
             
         except requests.exceptions.RequestException as e:
-            current_app.logger.error(f"EPİAŞ MCP Hatası: {str(e)}")
+            logger.warning(f"EPİAŞ MCP (TGT) Hatası: {str(e)}")
+            return None
+        except ValueError as e:
+            logger.warning(f"EPİAŞ MCP JSON parse hatası: {str(e)}")
             return None
     
     def _get_mcp_public(self, date_obj: datetime) -> Optional[List[Dict[str, Any]]]:
@@ -177,17 +222,22 @@ class EpiasService:
         }
         
         try:
-            response = requests.post(url, json=payload, headers=self.HEADERS, timeout=15)
+            response = requests.post(url, json=payload, headers=self.HEADERS, timeout=20)
             response.raise_for_status()
             
             data = response.json()
             if "items" in data:
-                return self._normalize_mcp_data(data["items"])
+                items = self._normalize_mcp_data(data["items"])
+                logger.info(f"EPİAŞ MCP (public) verisi alındı: {date_str} ({len(items)} kayıt)")
+                return items
             
             return []
             
         except requests.exceptions.RequestException as e:
-            current_app.logger.error(f"EPİAŞ Public MCP Hatası: {str(e)}")
+            logger.warning(f"EPİAŞ Public MCP Hatası: {str(e)}")
+            return None
+        except ValueError as e:
+            logger.warning(f"EPİAŞ Public MCP JSON parse hatası: {str(e)}")
             return None
     
     def _normalize_mcp_data(self, items: List[Dict]) -> List[Dict[str, Any]]:
@@ -216,7 +266,7 @@ class EpiasService:
                     "market_type": "PTF"
                 })
             except (ValueError, KeyError) as e:
-                current_app.logger.warning(f"EPİAŞ veri parse hatası: {e}")
+                logger.warning(f"EPİAŞ veri parse hatası: {e}")
                 continue
         
         return normalized
@@ -230,7 +280,7 @@ class EpiasService:
         """
         tgt = self.get_tgt()
         if not tgt:
-            current_app.logger.warning("TGT gerekli: realtime-consumption")
+            logger.warning("TGT gerekli: realtime-consumption")
             return None
         
         url = f"{self.BASE_URL}/consumption/data/realtime-consumption"
@@ -247,7 +297,7 @@ class EpiasService:
             return response.json().get("items", [])
             
         except requests.exceptions.RequestException as e:
-            current_app.logger.error(f"EPİAŞ Consumption Hatası: {str(e)}")
+            logger.error(f"EPİAŞ Consumption Hatası: {str(e)}")
             return None
     
     def get_smp(self, date_obj: datetime = None) -> Optional[List[Dict[str, Any]]]:
@@ -283,7 +333,7 @@ class EpiasService:
             return []
             
         except requests.exceptions.RequestException as e:
-            current_app.logger.error(f"EPİAŞ SMP Hatası: {str(e)}")
+            logger.error(f"EPİAŞ SMP Hatası: {str(e)}")
             return None
     
     def _normalize_smp_data(self, items: List[Dict]) -> List[Dict[str, Any]]:
@@ -307,7 +357,7 @@ class EpiasService:
                     "market_type": "SMF"
                 })
             except (ValueError, KeyError) as e:
-                current_app.logger.warning(f"EPİAŞ SMP parse hatası: {e}")
+                logger.warning(f"EPİAŞ SMP parse hatası: {e}")
                 continue
         
         return normalized
