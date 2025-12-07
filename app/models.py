@@ -71,6 +71,267 @@ class AssetType(str, Enum):
 
 
 # ==========================================
+# 0.5 ROL VE YETKİ YÖNETİMİ (RBAC)
+# ==========================================
+
+
+# Rol-Yetki ara tablosu (Many-to-Many)
+role_permissions = db.Table(
+    'role_permissions',
+    db.Column('role_id', UUID(as_uuid=True), db.ForeignKey('roles.id'), primary_key=True),
+    db.Column('permission_id', UUID(as_uuid=True), db.ForeignKey('permissions.id'), primary_key=True),
+    db.Column('created_at', db.DateTime, default=datetime.utcnow)
+)
+
+
+class Permission(db.Model):
+    """
+    Yetki Tanımı - Granüler izinler.
+    
+    Örnek: can_edit_device, can_delete_automation, can_view_wallet
+    """
+    __tablename__ = 'permissions'
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Yetki kodu (unique, snake_case)
+    code = db.Column(db.String(100), unique=True, nullable=False)  # can_edit_device
+    
+    # Görünen isim
+    name = db.Column(db.String(100), nullable=False)  # "Cihaz Düzenleme"
+    
+    # Açıklama
+    description = db.Column(db.String(255))
+    
+    # Kategori (gruplama için)
+    category = db.Column(db.String(50))  # devices, automations, wallet, settings
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "code": self.code,
+            "name": self.name,
+            "description": self.description,
+            "category": self.category,
+        }
+
+
+class Role(db.Model):
+    """
+    Rol Tanımı - Yetki grupları.
+    
+    Örnek: super_admin, admin, operator, viewer, farmer
+    """
+    __tablename__ = 'roles'
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Rol kodu (unique, snake_case)
+    code = db.Column(db.String(50), unique=True, nullable=False)  # super_admin
+    
+    # Görünen isim
+    name = db.Column(db.String(100), nullable=False)  # "Süper Admin"
+    
+    # Açıklama
+    description = db.Column(db.String(255))
+    
+    # Sistem rolü mü? (Silinemez)
+    is_system = db.Column(db.Boolean, default=False)
+    
+    # Aktif mi?
+    is_active = db.Column(db.Boolean, default=True)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # İlişkiler
+    permissions = db.relationship(
+        'Permission',
+        secondary=role_permissions,
+        backref=db.backref('roles', lazy='dynamic'),
+        lazy='joined'
+    )
+
+    def to_dict(self, include_permissions=False):
+        data = {
+            "id": str(self.id),
+            "code": self.code,
+            "name": self.name,
+            "description": self.description,
+            "is_system": self.is_system,
+            "is_active": self.is_active,
+        }
+        if include_permissions:
+            data["permissions"] = [p.to_dict() for p in self.permissions]
+        return data
+    
+    def has_permission(self, permission_code: str) -> bool:
+        """Bu rolde belirtilen yetki var mı?"""
+        return any(p.code == permission_code for p in self.permissions)
+    
+    @classmethod
+    def get_by_code(cls, code: str):
+        """Rol koduna göre bul."""
+        return cls.query.filter_by(code=code, is_active=True).first()
+    
+    @classmethod
+    def seed_default_roles(cls):
+        """Varsayılan rolleri ve yetkileri oluştur."""
+        from app.extensions import db
+        
+        # Önce yetkileri oluştur
+        default_permissions = [
+            # Cihaz yetkileri
+            ("can_view_devices", "Cihazları Görüntüle", "devices", "Cihaz listesini görüntüleme"),
+            ("can_edit_devices", "Cihaz Düzenle", "devices", "Cihaz ekleme/düzenleme"),
+            ("can_delete_devices", "Cihaz Sil", "devices", "Cihaz silme"),
+            ("can_control_devices", "Cihaz Kontrol", "devices", "Cihazları aç/kapat"),
+            
+            # Otomasyon yetkileri
+            ("can_view_automations", "Otomasyonları Görüntüle", "automations", "Otomasyon listesi"),
+            ("can_edit_automations", "Otomasyon Düzenle", "automations", "Otomasyon ekleme/düzenleme"),
+            ("can_delete_automations", "Otomasyon Sil", "automations", "Otomasyon silme"),
+            
+            # Cüzdan yetkileri
+            ("can_view_wallet", "Cüzdan Görüntüle", "wallet", "Bakiye ve işlem geçmişi"),
+            ("can_transfer_wallet", "Transfer Yap", "wallet", "Coin transferi"),
+            
+            # Bildirim yetkileri
+            ("can_view_notifications", "Bildirimleri Görüntüle", "notifications", "Bildirim listesi"),
+            ("can_manage_notifications", "Bildirim Yönet", "notifications", "Bildirim ayarları"),
+            
+            # Entegrasyon yetkileri
+            ("can_view_integrations", "Entegrasyonları Görüntüle", "integrations", "Entegrasyon listesi"),
+            ("can_manage_integrations", "Entegrasyon Yönet", "integrations", "Entegrasyon ekleme/silme"),
+            
+            # Market yetkileri
+            ("can_view_market", "Piyasa Görüntüle", "market", "Fiyat verileri"),
+            ("can_import_market", "Fiyat İçe Aktar", "market", "EPİAŞ fiyat yükleme"),
+            
+            # Ayar yetkileri
+            ("can_view_settings", "Ayarları Görüntüle", "settings", "Sistem ayarları"),
+            ("can_edit_settings", "Ayar Düzenle", "settings", "Ayar değiştirme"),
+            
+            # Kullanıcı yetkileri
+            ("can_view_users", "Kullanıcıları Görüntüle", "users", "Kullanıcı listesi"),
+            ("can_manage_users", "Kullanıcı Yönet", "users", "Kullanıcı ekleme/düzenleme"),
+            
+            # Rol yetkileri
+            ("can_view_roles", "Rolleri Görüntüle", "roles", "Rol listesi"),
+            ("can_manage_roles", "Rol Yönet", "roles", "Rol ekleme/düzenleme"),
+            
+            # Dashboard
+            ("can_view_dashboard", "Dashboard Görüntüle", "dashboard", "Ana panel"),
+            ("can_view_analytics", "Analitik Görüntüle", "analytics", "Raporlar ve grafikler"),
+        ]
+        
+        permissions_map = {}
+        for code, name, category, desc in default_permissions:
+            perm = Permission.query.filter_by(code=code).first()
+            if not perm:
+                perm = Permission(code=code, name=name, category=category, description=desc)
+                db.session.add(perm)
+            permissions_map[code] = perm
+        
+        db.session.flush()
+        
+        # Rolleri oluştur
+        default_roles = [
+            {
+                "code": "super_admin",
+                "name": "Süper Admin",
+                "description": "Tüm yetkilere sahip sistem yöneticisi",
+                "is_system": True,
+                "permissions": list(permissions_map.keys()),  # Tüm yetkiler
+            },
+            {
+                "code": "admin",
+                "name": "Admin",
+                "description": "Organizasyon yöneticisi",
+                "is_system": True,
+                "permissions": [
+                    "can_view_devices", "can_edit_devices", "can_delete_devices", "can_control_devices",
+                    "can_view_automations", "can_edit_automations", "can_delete_automations",
+                    "can_view_wallet", "can_transfer_wallet",
+                    "can_view_notifications", "can_manage_notifications",
+                    "can_view_integrations", "can_manage_integrations",
+                    "can_view_market",
+                    "can_view_settings", "can_edit_settings",
+                    "can_view_users", "can_manage_users",
+                    "can_view_dashboard", "can_view_analytics",
+                ],
+            },
+            {
+                "code": "operator",
+                "name": "Operatör",
+                "description": "Cihaz ve otomasyon yönetimi",
+                "is_system": True,
+                "permissions": [
+                    "can_view_devices", "can_edit_devices", "can_control_devices",
+                    "can_view_automations", "can_edit_automations",
+                    "can_view_wallet",
+                    "can_view_notifications",
+                    "can_view_integrations",
+                    "can_view_market",
+                    "can_view_dashboard",
+                ],
+            },
+            {
+                "code": "viewer",
+                "name": "İzleyici",
+                "description": "Sadece görüntüleme yetkisi",
+                "is_system": True,
+                "permissions": [
+                    "can_view_devices",
+                    "can_view_automations",
+                    "can_view_wallet",
+                    "can_view_notifications",
+                    "can_view_market",
+                    "can_view_dashboard",
+                ],
+            },
+            {
+                "code": "farmer",
+                "name": "Çiftçi",
+                "description": "Tarım kullanıcısı - cihaz kontrolü ve izleme",
+                "is_system": False,
+                "permissions": [
+                    "can_view_devices", "can_control_devices",
+                    "can_view_automations", "can_edit_automations",
+                    "can_view_wallet",
+                    "can_view_notifications",
+                    "can_view_market",
+                    "can_view_dashboard", "can_view_analytics",
+                ],
+            },
+        ]
+        
+        for role_data in default_roles:
+            role = cls.query.filter_by(code=role_data["code"]).first()
+            if not role:
+                role = cls(
+                    code=role_data["code"],
+                    name=role_data["name"],
+                    description=role_data["description"],
+                    is_system=role_data["is_system"],
+                )
+                db.session.add(role)
+                db.session.flush()
+            
+            # Yetkileri ekle
+            for perm_code in role_data["permissions"]:
+                if perm_code in permissions_map:
+                    perm = permissions_map[perm_code]
+                    if perm not in role.permissions:
+                        role.permissions.append(perm)
+        
+        db.session.commit()
+        return True
+
+
+# ==========================================
 # 1. ORGANİZASYON VE KULLANICI KATMANI
 # ==========================================
 
@@ -111,7 +372,6 @@ class Organization(db.Model):
     automations = db.relationship("Automation", backref="organization", lazy=True)
     tariffs = db.relationship("ElectricityTariff", backref="organization", lazy=True)
     audit_logs = db.relationship("AuditLog", backref="organization", lazy=True)
-    tariffs = db.relationship("ElectricityTariff", backref="organization", lazy=True)
 
     def to_dict(self):
         return {
@@ -133,6 +393,7 @@ class User(db.Model):
     Kullanıcı - Auth0 ile entegre.
     
     Her kullanıcı bir Organization'a bağlıdır.
+    Rol, roles tablosundan gelir (RBAC).
     """
     __tablename__ = "users"
 
@@ -148,7 +409,10 @@ class User(db.Model):
     telegram_chat_id = db.Column(db.String(50), unique=True)
     telegram_username = db.Column(db.String(100))
     
-    role = db.Column(db.String(20), default="admin")  # superadmin, admin, operator, viewer
+    # RBAC - Rol ilişkisi
+    role_id = db.Column(UUID(as_uuid=True), db.ForeignKey("roles.id"))
+    role = db.relationship("Role", backref="users", lazy="joined")
+    
     is_active = db.Column(db.Boolean, default=True)
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -156,19 +420,106 @@ class User(db.Model):
 
     # İlişkiler
     notifications = db.relationship("Notification", backref="user", lazy=True)
+    settings = db.relationship("UserSettings", backref="user", uselist=False, lazy=True)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_permissions=False):
+        data = {
             "id": str(self.id),
             "organization_id": str(self.organization_id) if self.organization_id else None,
             "email": self.email,
             "full_name": self.full_name,
             "phone_number": self.phone_number,
             "telegram_username": self.telegram_username,
-            "role": self.role,
+            "role": self.role.to_dict(include_permissions) if self.role else None,
+            "role_code": self.role.code if self.role else None,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if include_permissions and self.role:
+            data["permissions"] = [p.code for p in self.role.permissions]
+        return data
+    
+    def has_permission(self, permission_code: str) -> bool:
+        """Kullanıcının belirtilen yetkisi var mı?"""
+        if not self.role:
+            return False
+        return self.role.has_permission(permission_code)
+    
+    def has_any_permission(self, *permission_codes) -> bool:
+        """Kullanıcının belirtilen yetkilerden herhangi biri var mı?"""
+        if not self.role:
+            return False
+        return any(self.role.has_permission(code) for code in permission_codes)
+    
+    def has_all_permissions(self, *permission_codes) -> bool:
+        """Kullanıcının belirtilen tüm yetkileri var mı?"""
+        if not self.role:
+            return False
+        return all(self.role.has_permission(code) for code in permission_codes)
+
+
+class UserSettings(db.Model):
+    """
+    Kullanıcı Ayarları - Bildirim tercihleri, UI ayarları vb.
+    
+    Her kullanıcının bir ayar kaydı olur (1:1 ilişki).
+    """
+    __tablename__ = "user_settings"
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey("users.id"), unique=True, nullable=False)
+    
+    # Bildirim Kanalları
+    telegram_enabled = db.Column(db.Boolean, default=False)
+    email_enabled = db.Column(db.Boolean, default=True)
+    push_enabled = db.Column(db.Boolean, default=False)
+    
+    # Bildirim Türleri
+    price_alerts = db.Column(db.Boolean, default=True)
+    device_alerts = db.Column(db.Boolean, default=True)
+    automation_alerts = db.Column(db.Boolean, default=True)
+    security_alerts = db.Column(db.Boolean, default=True)
+    weekly_report = db.Column(db.Boolean, default=True)
+    
+    # UI Tercihleri
+    language = db.Column(db.String(10), default="tr")
+    theme = db.Column(db.String(20), default="system")  # light, dark, system
+    dashboard_layout = db.Column(JSONB, default=dict)
+    
+    # Fiyat Uyarı Eşikleri
+    price_alert_threshold_low = db.Column(db.Numeric(10, 2))  # TL/kWh altında uyar
+    price_alert_threshold_high = db.Column(db.Numeric(10, 2))  # TL/kWh üstünde uyar
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "user_id": str(self.user_id),
+            "telegram_enabled": self.telegram_enabled,
+            "email_enabled": self.email_enabled,
+            "push_enabled": self.push_enabled,
+            "price_alerts": self.price_alerts,
+            "device_alerts": self.device_alerts,
+            "automation_alerts": self.automation_alerts,
+            "security_alerts": self.security_alerts,
+            "weekly_report": self.weekly_report,
+            "language": self.language,
+            "theme": self.theme,
+            "price_alert_threshold_low": float(self.price_alert_threshold_low) if self.price_alert_threshold_low else None,
+            "price_alert_threshold_high": float(self.price_alert_threshold_high) if self.price_alert_threshold_high else None,
+        }
+    
+    @classmethod
+    def get_or_create(cls, user_id):
+        """Kullanıcı ayarlarını getir veya varsayılan oluştur."""
+        settings = cls.query.filter_by(user_id=user_id).first()
+        if not settings:
+            settings = cls(user_id=user_id)
+            db.session.add(settings)
+            db.session.commit()
+        return settings
 
 
 # ==========================================
@@ -189,6 +540,7 @@ class Gateway(db.Model):
     
     serial_number = db.Column(db.String(100), unique=True)
     model = db.Column(db.String(50))
+    gateway_type = db.Column(db.String(50))  # teltonika, raspberry_pi, shelly_pro, custom
     
     ip_address = db.Column(db.String(45))
     mac_address = db.Column(db.String(17))
@@ -211,6 +563,7 @@ class Gateway(db.Model):
             "organization_id": str(self.organization_id),
             "serial_number": self.serial_number,
             "model": self.model,
+            "gateway_type": self.gateway_type,
             "ip_address": self.ip_address,
             "status": self.status,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
@@ -328,6 +681,7 @@ class SmartDevice(db.Model):
     
     brand = db.Column(db.String(50))  # shelly, tapo, tuya
     model = db.Column(db.String(50))
+    device_type = db.Column(db.String(50))  # relay, energy_meter, sensor, switch, plug, dimmer
     
     is_sensor = db.Column(db.Boolean, default=False)
     is_actuator = db.Column(db.Boolean, default=False)
@@ -356,6 +710,7 @@ class SmartDevice(db.Model):
             "name": self.name,
             "brand": self.brand,
             "model": self.model,
+            "device_type": self.device_type,
             "is_sensor": self.is_sensor,
             "is_actuator": self.is_actuator,
             "is_online": self.is_online,
@@ -449,6 +804,7 @@ class Automation(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id = db.Column(UUID(as_uuid=True), db.ForeignKey("organizations.id"), nullable=False)
     asset_id = db.Column(UUID(as_uuid=True), db.ForeignKey("smart_assets.id"))
+    created_by = db.Column(UUID(as_uuid=True), db.ForeignKey("users.id"))  # Row-level security için
     
     name = db.Column(db.String(100))
     description = db.Column(db.Text)
@@ -470,6 +826,7 @@ class Automation(db.Model):
             "id": str(self.id),
             "organization_id": str(self.organization_id),
             "asset_id": str(self.asset_id) if self.asset_id else None,
+            "created_by": str(self.created_by) if self.created_by else None,
             "name": self.name,
             "description": self.description,
             "is_active": self.is_active,
@@ -716,5 +1073,49 @@ class Notification(db.Model):
             "data": self.data or {},
             "sent_at": self.sent_at.isoformat() if self.sent_at else None,
             "read_at": self.read_at.isoformat() if self.read_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ==========================================
+# 6. DENETİM KAYITLARI (AUDIT LOG)
+# ==========================================
+
+
+class AuditLog(db.Model):
+    """
+    Denetim Kaydı - Kullanıcı işlemlerinin geçmişi.
+    
+    Row-level security: Admin tüm kayıtları görür, diğerleri sadece kendi işlemlerini.
+    """
+    __tablename__ = "audit_logs"
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(UUID(as_uuid=True), db.ForeignKey("organizations.id"), nullable=False)
+    user_id = db.Column(UUID(as_uuid=True), db.ForeignKey("users.id"), nullable=False)
+    
+    action = db.Column(db.String(100), nullable=False)  # device.toggle, automation.create, etc.
+    resource_type = db.Column(db.String(50))  # device, automation, integration, etc.
+    resource_id = db.Column(db.String(100))   # İlgili kaynağın ID'si
+    
+    details = db.Column(JSONB, default=dict)  # Ek bilgiler (eski/yeni değerler vb.)
+    ip_address = db.Column(db.String(45))
+    user_agent = db.Column(db.String(255))
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # İlişkiler
+    user = db.relationship("User", backref="audit_logs", lazy=True)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "organization_id": str(self.organization_id),
+            "user_id": str(self.user_id),
+            "action": self.action,
+            "resource_type": self.resource_type,
+            "resource_id": self.resource_id,
+            "details": self.details or {},
+            "ip_address": self.ip_address,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

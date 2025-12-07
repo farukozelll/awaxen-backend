@@ -7,6 +7,7 @@ from datetime import datetime
 
 from app.extensions import celery, db
 from app.models import Integration, SmartDevice
+from app.data.integration_providers import get_shelly_device_type
 
 
 @celery.task
@@ -110,9 +111,14 @@ def _sync_shelly_devices(integration: Integration) -> list:
         response.raise_for_status()
         data = response.json()
     except requests.RequestException as e:
-        # Mock data for development
-        print(f"Shelly API error (using mock): {e}")
-        data = _get_mock_shelly_devices()
+        # API hatası - boş liste dön, mock data kullanma
+        print(f"Shelly API error: {e}")
+        return []
+    
+    # API başarısız yanıt döndüyse
+    if not data.get('isok', False):
+        print(f"Shelly API returned error: {data.get('errors', 'Unknown error')}")
+        return []
     
     synced_devices = []
     devices_data = data.get('data', {}).get('devices_status', {})
@@ -128,25 +134,36 @@ def _sync_shelly_devices(integration: Integration) -> list:
             # Güncelle
             existing.is_online = device_info.get('cloud', {}).get('connected', False)
             existing.last_seen = datetime.utcnow()
-            existing.metadata = {
-                **existing.metadata,
+            existing.settings = {
+                **(existing.settings or {}),
                 'firmware': device_info.get('sys', {}).get('fw_id'),
                 'ip': device_info.get('wifi', {}).get('sta_ip'),
             }
+            # device_type yoksa güncelle
+            if not existing.device_type:
+                existing.device_type = get_shelly_device_type(existing.model)
         else:
             # Yeni cihaz oluştur
+            model = device_info.get('model', 'unknown')
+            device_type = get_shelly_device_type(model)
+            
+            # Device type'a göre is_sensor ve is_actuator belirle
+            is_sensor = device_type in ['sensor', 'energy_meter']
+            is_actuator = device_type in ['relay', 'plug', 'dimmer', 'rgbw']
+            
             new_device = SmartDevice(
                 organization_id=integration.organization_id,
                 integration_id=integration.id,
                 external_id=device_id,
                 name=device_info.get('name', f'Shelly {device_id[-4:]}'),
                 brand='shelly',
-                model=device_info.get('model', 'unknown'),
-                is_sensor=True,  # Shelly cihazları genelde enerji ölçer
-                is_actuator=True,  # Ve kontrol edilebilir
+                model=model,
+                device_type=device_type,
+                is_sensor=is_sensor,
+                is_actuator=is_actuator,
                 is_online=device_info.get('cloud', {}).get('connected', False),
                 last_seen=datetime.utcnow(),
-                metadata={
+                settings={
                     'firmware': device_info.get('sys', {}).get('fw_id'),
                     'ip': device_info.get('wifi', {}).get('sta_ip'),
                     'mac': device_info.get('sys', {}).get('mac'),
@@ -183,39 +200,8 @@ def _sync_tuya_devices(integration: Integration) -> list:
     return []
 
 
-def _get_mock_shelly_devices() -> dict:
-    """Development için mock Shelly cihaz verisi."""
-    return {
-        'isok': True,
-        'data': {
-            'devices_status': {
-                'shellyplugeu-AABBCCDD1122': {
-                    'name': 'Salon Prizi',
-                    'model': 'SHPLG-EU',
-                    'cloud': {'connected': True},
-                    'sys': {
-                        'fw_id': '20231107-114426/1.0.0-g123456',
-                        'mac': 'AA:BB:CC:DD:11:22'
-                    },
-                    'wifi': {'sta_ip': '192.168.1.50'},
-                    'switch:0': {'output': True},
-                    'pm1:0': {'apower': 125.5, 'voltage': 230.2}
-                },
-                'shellyplugeu-AABBCCDD3344': {
-                    'name': 'Klima Prizi',
-                    'model': 'SHPLG-EU',
-                    'cloud': {'connected': True},
-                    'sys': {
-                        'fw_id': '20231107-114426/1.0.0-g123456',
-                        'mac': 'AA:BB:CC:DD:33:44'
-                    },
-                    'wifi': {'sta_ip': '192.168.1.51'},
-                    'switch:0': {'output': False},
-                    'pm1:0': {'apower': 0, 'voltage': 230.1}
-                }
-            }
-        }
-    }
+
+# Mock data fonksiyonu kaldırıldı - Sistem tamamen dinamik çalışıyor
 
 
 @celery.task

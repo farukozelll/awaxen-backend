@@ -82,3 +82,109 @@ def get_current_user_id():
     if hasattr(g, "current_user") and g.current_user:
         return g.current_user.get("sub")
     return None
+
+
+def requires_role(*allowed_roles):
+    """
+    Rol bazlı yetkilendirme decorator'ı.
+    
+    Kullanım:
+        @requires_auth
+        @requires_role('admin', 'super_admin')
+        def admin_only_endpoint():
+            ...
+    
+    Args:
+        *allowed_roles: İzin verilen rol kodları (örn: 'admin', 'super_admin', 'viewer')
+    
+    Not: Bu decorator @requires_auth'dan SONRA kullanılmalıdır.
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            # Lazy import to avoid circular dependency
+            from app.models import User
+            
+            auth0_id = get_current_user_id()
+            if not auth0_id:
+                return jsonify({"error": "Kullanıcı bulunamadı", "code": "user_not_found"}), 401
+            
+            user = User.query.filter_by(auth0_id=auth0_id).first()
+            if not user:
+                return jsonify({"error": "Kullanıcı veritabanında bulunamadı", "code": "user_not_in_db"}), 401
+            
+            # Rol kontrolü (RBAC - role tablosundan)
+            user_role_code = user.role.code if user.role else None
+            if user_role_code not in allowed_roles:
+                return jsonify({
+                    "error": "Bu işlem için yetkiniz yok",
+                    "code": "forbidden",
+                    "required_roles": list(allowed_roles),
+                    "your_role": user_role_code
+                }), 403
+            
+            # Kullanıcıyı g'ye ekle (endpoint'te tekrar sorgu yapılmasın)
+            g.db_user = user
+            
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+def requires_permission(*required_permissions):
+    """
+    Yetki bazlı yetkilendirme decorator'ı (Granüler kontrol).
+    
+    Kullanım:
+        @requires_auth
+        @requires_permission('can_edit_devices', 'can_delete_devices')
+        def device_management_endpoint():
+            ...
+    
+    Args:
+        *required_permissions: Gerekli yetki kodları (herhangi biri yeterli)
+    
+    Not: Bu decorator @requires_auth'dan SONRA kullanılmalıdır.
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            from app.models import User
+            
+            auth0_id = get_current_user_id()
+            if not auth0_id:
+                return jsonify({"error": "Kullanıcı bulunamadı", "code": "user_not_found"}), 401
+            
+            user = User.query.filter_by(auth0_id=auth0_id).first()
+            if not user:
+                return jsonify({"error": "Kullanıcı veritabanında bulunamadı", "code": "user_not_in_db"}), 401
+            
+            # Yetki kontrolü (herhangi biri yeterli)
+            if not user.has_any_permission(*required_permissions):
+                return jsonify({
+                    "error": "Bu işlem için yetkiniz yok",
+                    "code": "forbidden",
+                    "required_permissions": list(required_permissions),
+                    "your_permissions": [p.code for p in user.role.permissions] if user.role else []
+                }), 403
+            
+            g.db_user = user
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
+
+
+def get_db_user():
+    """
+    requires_role/requires_permission decorator'ı tarafından cache'lenen kullanıcıyı döndür.
+    Eğer yoksa veritabanından çeker.
+    """
+    if hasattr(g, 'db_user') and g.db_user:
+        return g.db_user
+    
+    # Fallback: veritabanından çek
+    from app.models import User
+    auth0_id = get_current_user_id()
+    if auth0_id:
+        return User.query.filter_by(auth0_id=auth0_id).first()
+    return None

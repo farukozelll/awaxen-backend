@@ -6,7 +6,8 @@ Dakikalık olarak aktif otomasyonları değerlendirir ve tetikler.
 from datetime import datetime
 
 from app.extensions import celery, db
-from app.models import Automation, AutomationLog, MarketPrice, SmartAsset
+from app.models import Automation, AutomationLog, MarketPrice, SmartAsset, DeviceTelemetry
+from app.services.shelly_service import get_shelly_service
 
 
 @celery.task
@@ -145,9 +146,53 @@ def _evaluate_time_trigger(trigger: dict) -> tuple[bool, str]:
 
 
 def _evaluate_sensor_trigger(trigger: dict, asset: SmartAsset) -> tuple[bool, str]:
-    """Sensör değeri kontrolü."""
-    # TODO: Implement sensor-based triggers
-    return False, "Sensor triggers not yet implemented"
+    """
+    Sensör değeri kontrolü.
+    
+    Örnek trigger:
+    {
+        "type": "sensor",
+        "key": "temperature",  # veya "power", "humidity", "voltage"
+        "operator": ">",       # <, >, <=, >=, ==
+        "value": 30            # Eşik değeri
+    }
+    """
+    if not asset or not asset.device:
+        return False, "Asset veya cihaz bulunamadı"
+    
+    sensor_key = trigger.get('key', 'temperature')
+    operator = trigger.get('operator', '>')
+    threshold = trigger.get('value', 0)
+    
+    # Son telemetri verisini al
+    latest = DeviceTelemetry.query.filter_by(
+        device_id=asset.device.id,
+        key=sensor_key
+    ).order_by(DeviceTelemetry.time.desc()).first()
+    
+    if not latest:
+        return False, f"'{sensor_key}' için telemetri verisi bulunamadı"
+    
+    value = latest.value
+    
+    # Karşılaştırma operatörleri
+    comparisons = {
+        '<': lambda v, t: v < t,
+        '>': lambda v, t: v > t,
+        '<=': lambda v, t: v <= t,
+        '>=': lambda v, t: v >= t,
+        '==': lambda v, t: v == t,
+        '!=': lambda v, t: v != t,
+    }
+    
+    compare_func = comparisons.get(operator)
+    if not compare_func:
+        return False, f"Geçersiz operatör: {operator}"
+    
+    if compare_func(value, threshold):
+        return True, f"Sensör {sensor_key}={value} {operator} {threshold} koşulu sağlandı"
+    
+    return False, f"Sensör {sensor_key}={value}, koşul {operator} {threshold} sağlanmadı"
 
 
 def _execute_automation(automation: Automation) -> bool:
@@ -190,25 +235,69 @@ def _control_device(asset: SmartAsset, state: str) -> bool:
     """
     Cihazı aç/kapat.
     
-    TODO: Gerçek cihaz kontrolü için ShellyService vb. kullanılacak.
+    Args:
+        asset: Kontrol edilecek varlık
+        state: 'on', 'off', 'toggle'
+    
+    Returns:
+        True if successful, False otherwise
     """
     device = asset.device
     if not device:
+        print(f"[AUTOMATION] Asset {asset.name} has no linked device")
         return False
     
-    # Placeholder - gerçek implementasyon servislerde
-    print(f"[AUTOMATION] Would {state} device {device.name} for asset {asset.name}")
+    # Shelly cihazları için
+    if device.brand == 'shelly':
+        service = get_shelly_service(str(device.organization_id))
+        if service:
+            try:
+                if state == 'on':
+                    return service.turn_on(device)
+                elif state == 'off':
+                    return service.turn_off(device)
+                elif state == 'toggle':
+                    return service.toggle(device)
+            except Exception as e:
+                print(f"[AUTOMATION] Shelly control error: {e}")
+                return False
+        else:
+            print(f"[AUTOMATION] No active Shelly integration for org {device.organization_id}")
+            return False
+    
+    # Diğer markalar için placeholder
+    print(f"[AUTOMATION] Device brand '{device.brand}' not yet supported, would {state} {device.name}")
     return True
 
 
 def _set_device_power(asset: SmartAsset, power_level: int) -> bool:
-    """Cihaz güç seviyesini ayarla."""
+    """
+    Cihaz güç seviyesini ayarla (dimmer, HVAC vb. için).
+    
+    Args:
+        asset: Kontrol edilecek varlık
+        power_level: 0-100 arası güç yüzdesi
+    
+    Returns:
+        True if successful, False otherwise
+    """
     device = asset.device
     if not device:
+        print(f"[AUTOMATION] Asset {asset.name} has no linked device")
         return False
     
-    print(f"[AUTOMATION] Would set power to {power_level}% for device {device.name}")
-    return True
+    # Shelly dimmer/RGBW için
+    if device.brand == 'shelly' and device.device_type in ['dimmer', 'rgbw']:
+        service = get_shelly_service(str(device.organization_id))
+        if service:
+            try:
+                return service.set_power_limit(device, power_level)
+            except Exception as e:
+                print(f"[AUTOMATION] Shelly power control error: {e}")
+                return False
+    
+    print(f"[AUTOMATION] Power control not supported for {device.brand}/{device.device_type}")
+    return False
 
 
 @celery.task

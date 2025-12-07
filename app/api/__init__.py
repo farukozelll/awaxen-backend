@@ -35,3 +35,4 @@ from . import routes_telemetry
 from . import routes_market
 from . import routes_wallet
 from . import routes_notifications
+from . import routes_roles  # RBAC - Rol ve Yetki Yönetimi

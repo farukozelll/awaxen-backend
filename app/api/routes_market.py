@@ -5,12 +5,12 @@ from flask import jsonify, request
 
 from . import api_bp
 from .helpers import get_or_create_user
-from ..auth import requires_auth
+from ..auth import requires_auth, requires_role, get_db_user
 from ..services import (
     save_market_prices,
     get_market_prices_for_date,
     get_current_market_price,
-)
+) 
 
 
 @api_bp.route('/market-prices', methods=['GET'])
@@ -128,9 +128,10 @@ def get_current_price():
 
 @api_bp.route('/market-prices', methods=['POST'])
 @requires_auth
+@requires_role('admin', 'super_admin')
 def import_market_prices():
     """
-    EPİAŞ fiyatlarını içe aktar (Admin/Cron job için).
+    EPİAŞ fiyatlarını içe aktar (Sadece Admin).
     ---
     tags:
       - Market
@@ -179,12 +180,11 @@ def import_market_prices():
         description: Fiyat verisi bulunamadı
       401:
         description: Yetkisiz erişim
+      403:
+        description: Yetki yetersiz (Admin gerekli)
     """
-    user = get_or_create_user()
-    if not user:
-        return jsonify({"error": "Kullanıcı bulunamadı"}), 401
-
-    # TODO: Admin kontrolü eklenebilir
+    user = get_db_user()
+    
     data = request.json
     prices = data.get("prices", [])
 

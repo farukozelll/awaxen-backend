@@ -155,12 +155,39 @@ class ShellyService:
     
     def set_power_limit(self, device: SmartDevice, power_limit: int) -> bool:
         """
-        Güç limitini ayarla (destekleyen cihazlar için).
+        Güç limitini veya parlaklık seviyesini ayarla (dimmer/RGBW için).
         
         Args:
-            power_limit: Watt cinsinden maksimum güç
+            device: Kontrol edilecek cihaz
+            power_limit: 0-100 arası parlaklık yüzdesi (dimmer için)
+        
+        Returns:
+            True if successful, False otherwise
         """
-        # TODO: Implement power limit for supported devices
+        if not device.external_id:
+            raise ValueError("Device has no external_id")
+        
+        # Dimmer cihazlar için parlaklık ayarı
+        if device.device_type in ['dimmer', 'rgbw']:
+            try:
+                # Shelly Cloud API - Light control
+                self._make_request('device/light/control', {
+                    'id': device.external_id,
+                    'channel': 0,
+                    'brightness': max(0, min(100, power_limit)),
+                    'turn': 'on' if power_limit > 0 else 'off'
+                })
+                
+                device.last_seen = datetime.utcnow()
+                db.session.commit()
+                return True
+                
+            except Exception as e:
+                print(f"Shelly dimmer control error: {e}")
+                return False
+        
+        # Diğer cihazlar için desteklenmiyor
+        print(f"Power limit not supported for device type: {device.device_type}")
         return False
     
     def get_energy_data(self, device: SmartDevice, date_from: str = None, date_to: str = None) -> list:

@@ -9,7 +9,7 @@ from flask import jsonify, request
 from . import api_bp
 from .helpers import get_current_user, get_pagination_params, paginate_response
 from app.extensions import db
-from app.models import Notification, NotificationStatus
+from app.models import Notification, NotificationStatus, UserSettings
 from app.auth import requires_auth
 
 
@@ -394,7 +394,8 @@ def create_notification():
     target_user_id = data.get("user_id") or user.id
     
     # Admin kontrolü
-    if str(target_user_id) != str(user.id) and user.role not in ["admin", "superadmin"]:
+    user_role_code = user.role.code if user.role else None
+    if str(target_user_id) != str(user.id) and user_role_code not in ["admin", "super_admin"]:
         return jsonify({"error": "Forbidden"}), 403
     
     notification = Notification(
@@ -486,6 +487,18 @@ def get_notification_settings():
               type: boolean
             automation_alerts:
               type: boolean
+            security_alerts:
+              type: boolean
+            weekly_report:
+              type: boolean
+            language:
+              type: string
+            theme:
+              type: string
+            price_alert_threshold_low:
+              type: number
+            price_alert_threshold_high:
+              type: number
       401:
         description: Yetkisiz erişim
     """
@@ -493,15 +506,95 @@ def get_notification_settings():
     if not user:
         return jsonify({"error": "Unauthorized"}), 401
     
-    # TODO: User settings tablosundan çek
-    # Şimdilik default değerler
+    # Veritabanından ayarları getir veya varsayılan oluştur
+    settings = UserSettings.get_or_create(user.id)
+    
+    # Telegram durumunu user tablosundan kontrol et
+    response = settings.to_dict()
+    response["telegram_enabled"] = settings.telegram_enabled and bool(user.telegram_chat_id)
+    response["telegram_connected"] = bool(user.telegram_chat_id)
+    
+    return jsonify(response)
+
+
+@api_bp.route('/notifications/settings', methods=['PUT', 'PATCH'])
+@requires_auth
+def update_notification_settings():
+    """
+    Bildirim ayarlarını güncelle.
+    ---
+    tags:
+      - Notifications
+    security:
+      - bearerAuth: []
+    consumes:
+      - application/json
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            telegram_enabled:
+              type: boolean
+            email_enabled:
+              type: boolean
+            push_enabled:
+              type: boolean
+            price_alerts:
+              type: boolean
+            device_alerts:
+              type: boolean
+            automation_alerts:
+              type: boolean
+            security_alerts:
+              type: boolean
+            weekly_report:
+              type: boolean
+            language:
+              type: string
+            theme:
+              type: string
+            price_alert_threshold_low:
+              type: number
+            price_alert_threshold_high:
+              type: number
+    responses:
+      200:
+        description: Ayarlar güncellendi
+      400:
+        description: Geçersiz veri
+      401:
+        description: Yetkisiz erişim
+    """
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = request.get_json() or {}
+    
+    # Ayarları getir veya oluştur
+    settings = UserSettings.get_or_create(user.id)
+    
+    # İzin verilen alanları güncelle
+    allowed_fields = [
+        'telegram_enabled', 'email_enabled', 'push_enabled',
+        'price_alerts', 'device_alerts', 'automation_alerts',
+        'security_alerts', 'weekly_report',
+        'language', 'theme',
+        'price_alert_threshold_low', 'price_alert_threshold_high'
+    ]
+    
+    for field in allowed_fields:
+        if field in data:
+            setattr(settings, field, data[field])
+    
+    db.session.commit()
+    
     return jsonify({
-        "telegram_enabled": bool(user.telegram_chat_id),
-        "email_enabled": True,
-        "push_enabled": False,
-        "price_alerts": True,
-        "device_alerts": True,
-        "automation_alerts": True,
+        "message": "Ayarlar güncellendi",
+        "settings": settings.to_dict()
     })
 
 

@@ -79,7 +79,13 @@ def list_automations():
     search = request.args.get("search", "", type=str).strip()
     is_active = request.args.get("is_active")
     
+    # Temel filtre: Organizasyon bazlı izolasyon
     query = Automation.query.filter_by(organization_id=user.organization_id)
+    
+    # Row-Level Security: Admin/super_admin değilse sadece kendi oluşturduklarını görsün
+    user_role_code = user.role.code if user.role else None
+    if user_role_code not in ["admin", "super_admin"]:
+        query = query.filter_by(created_by=user.id)
     
     if search:
         query = query.filter(Automation.name.ilike(f"%{search}%"))
@@ -124,7 +130,13 @@ def get_automation(automation_id):
     
     automation = Automation.query.get_or_404(automation_id)
     
+    # Organizasyon kontrolü
     if automation.organization_id != user.organization_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    # Row-Level Security: Admin değilse sadece kendi oluşturduğunu görebilir
+    user_role_code = user.role.code if user.role else None
+    if user_role_code not in ["admin", "super_admin"] and automation.created_by != user.id:
         return jsonify({"error": "Forbidden"}), 403
     
     result = automation.to_dict()
@@ -219,6 +231,7 @@ def create_automation():
     automation = Automation(
         organization_id=user.organization_id,
         asset_id=asset_id,
+        created_by=user.id,  # Row-level security için oluşturan kullanıcı
         name=data["name"],
         description=data.get("description"),
         rules=data["rules"],
@@ -275,7 +288,13 @@ def update_automation(automation_id):
     
     automation = Automation.query.get_or_404(automation_id)
     
+    # Organizasyon kontrolü
     if automation.organization_id != user.organization_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    # Row-Level Security: Admin değilse sadece kendi oluşturduğunu güncelleyebilir
+    user_role_code = user.role.code if user.role else None
+    if user_role_code not in ["admin", "super_admin"] and automation.created_by != user.id:
         return jsonify({"error": "Forbidden"}), 403
     
     data = request.get_json()
@@ -325,7 +344,13 @@ def delete_automation(automation_id):
     
     automation = Automation.query.get_or_404(automation_id)
     
+    # Organizasyon kontrolü
     if automation.organization_id != user.organization_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    # Row-Level Security: Admin değilse sadece kendi oluşturduğunu silebilir
+    user_role_code = user.role.code if user.role else None
+    if user_role_code not in ["admin", "super_admin"] and automation.created_by != user.id:
         return jsonify({"error": "Forbidden"}), 403
     
     db.session.delete(automation)

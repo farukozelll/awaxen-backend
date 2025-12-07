@@ -77,6 +77,8 @@ def create_app():
 
     # Modelleri içeri aktar ve tabloları oluştur
     from .models import (  # noqa: F401
+        # v6.0 RBAC
+        Role, Permission,
         # v6.0 SaaS Core
         Organization, User, Gateway, Integration,
         # v6.0 Devices & Assets
@@ -90,6 +92,14 @@ def create_app():
     with app.app_context():
         db.create_all()
         print("v6.0 Tablolar kontrol edildi ve oluşturuldu.")
+        
+        # Varsayılan rolleri ve yetkileri oluştur (yoksa)
+        try:
+            if Role.query.count() == 0:
+                Role.seed_default_roles()
+                print("Varsayılan roller ve yetkiler oluşturuldu.")
+        except Exception as e:
+            print(f"Rol seed hatası (ilk çalıştırmada normal): {e}")
 
     # Rotaları kaydet (Modüler Blueprint yapısı)
     from .api import api_bp
@@ -115,35 +125,3 @@ def create_app():
             init_mqtt_client(app)
 
     return app
-
-
-def _seed_initial_data() -> None:
-    """Development convenience: populate sample organization/user data once."""
-    from .models import Organization, User
-
-    existing_user = User.query.filter_by(auth0_id="google-oauth2|114543030408234531565").first()
-    if existing_user:
-        return
-
-    # Demo organizasyon oluştur
-    org = Organization(
-        name="Awaxen Demo",
-        slug="awaxen-demo",
-        type="home",
-        timezone="Europe/Istanbul",
-    )
-    db.session.add(org)
-    db.session.flush()
-
-    # Demo kullanıcı oluştur
-    user = User(
-        organization_id=org.id,
-        auth0_id="google-oauth2|114543030408234531565",
-        email="awaxenofficial@gmail.com",
-        full_name="Awaxen Official",
-        role="admin",
-    )
-    db.session.add(user)
-    db.session.commit()
-    
-    print("Demo veriler oluşturuldu: Organization + User")

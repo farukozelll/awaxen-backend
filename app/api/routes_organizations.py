@@ -299,7 +299,8 @@ def update_organization(org_id):
     org = Organization.query.get_or_404(org_id)
     
     # Yetki kontrolü
-    if user.role not in ["superadmin", "admin"] or (user.role == "admin" and user.organization_id != org.id):
+    user_role_code = user.role.code if user.role else None
+    if user_role_code not in ["super_admin", "admin"] or (user_role_code == "admin" and user.organization_id != org.id):
         return jsonify({"error": "Forbidden"}), 403
     
     data = request.get_json()

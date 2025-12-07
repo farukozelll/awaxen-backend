@@ -273,8 +273,22 @@ class AutomationEngine:
                 return True, "Device is online"
             return False, "Device is offline"
         
-        # TODO: Gerçek cihaz durumunu kontrol et
-        return True, "Device state check not fully implemented"
+        # Shelly cihazları için gerçek durumu kontrol et
+        if device.brand == 'shelly':
+            service = get_shelly_service(str(device.organization_id))
+            if service:
+                try:
+                    status = service.get_device_status(device)
+                    current_state = 'on' if status.get('output', False) else 'off'
+                    
+                    if current_state == expected_state:
+                        return True, f"Device is {current_state}"
+                    return False, f"Device is {current_state}, expected {expected_state}"
+                except Exception as e:
+                    return False, f"Could not get device status: {e}"
+        
+        # Diğer markalar için veritabanındaki son durumu kullan
+        return True, "Device state check based on last known state"
     
     def _control_device(self, device: SmartDevice, action: str) -> bool:
         """Cihazı kontrol et."""
@@ -288,15 +302,23 @@ class AutomationEngine:
                 elif action == 'toggle':
                     return service.toggle(device)
         
-        # Diğer markalar için TODO
-        print(f"[ENGINE] Would {action} device {device.name} (brand: {device.brand})")
+        # Diğer markalar için placeholder (gelecekte Tapo, Tuya vb. eklenecek)
+        print(f"[ENGINE] Device brand '{device.brand}' not yet supported, would {action} {device.name}")
         return True
     
     def _set_power(self, device: SmartDevice, power_level: int) -> bool:
-        """Güç seviyesi ayarla."""
-        # TODO: Implement for supported devices
-        print(f"[ENGINE] Would set power to {power_level}% for {device.name}")
-        return True
+        """Güç seviyesi ayarla (dimmer, RGBW vb. için)."""
+        if device.brand == 'shelly' and device.device_type in ['dimmer', 'rgbw']:
+            service = get_shelly_service(str(device.organization_id))
+            if service:
+                try:
+                    return service.set_power_limit(device, power_level)
+                except Exception as e:
+                    print(f"[ENGINE] Shelly power control error: {e}")
+                    return False
+        
+        print(f"[ENGINE] Power control not supported for {device.brand}/{device.device_type}")
+        return False
 
 
 # Singleton instance

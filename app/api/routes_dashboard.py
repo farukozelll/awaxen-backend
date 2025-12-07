@@ -203,12 +203,35 @@ def _get_wallet_summary(user, day_start):
             WalletTransaction.amount > 0
         ).scalar() or 0.0
 
+    # Leaderboard sıralaması hesapla
+    rank = _calculate_user_rank(wallet)
+
     return {
         "balance": float(wallet.balance),
         "todays_earnings": float(today_earn),
         "level": wallet.level,
-        "rank": 5 # TODO: Leaderboard query eklenebilir
+        "rank": rank
     }
+
+
+def _calculate_user_rank(wallet: Wallet) -> int:
+    """Kullanıcının organizasyon içindeki sıralamasını hesapla."""
+    if not wallet or not wallet.user:
+        return 0
+    
+    org_id = wallet.user.organization_id
+    if not org_id:
+        return 0
+    
+    # Aynı organizasyondaki kullanıcıları bakiyeye göre sırala
+    higher_ranked = db.session.query(func.count(Wallet.id)).join(
+        Wallet.user
+    ).filter(
+        Wallet.user.has(organization_id=org_id),
+        Wallet.balance > wallet.balance
+    ).scalar() or 0
+    
+    return higher_ranked + 1  # 1-indexed rank
 
 def _get_active_alerts_count(org_id):
     """Okunmamış kritik bildirim sayısı."""

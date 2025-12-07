@@ -256,7 +256,8 @@ def add_reward():
     target_user_id = data.get("user_id") or user.id
     
     # Admin kontrolü (kendi dışında birine ödül vermek için)
-    if str(target_user_id) != str(user.id) and user.role not in ["admin", "superadmin"]:
+    user_role_code = user.role.code if user.role else None
+    if str(target_user_id) != str(user.id) and user_role_code not in ["admin", "super_admin"]:
         return jsonify({"error": "Forbidden"}), 403
     
     # Cüzdanı bul veya oluştur
@@ -376,12 +377,52 @@ def get_wallet_stats():
         func.sum(WalletTransaction.amount).desc()
     ).first()
     
+    # Streak hesaplama: Ardışık gün sayısı (ödül alınan)
+    streak_days = _calculate_streak_days(wallet.id)
+    
     return jsonify({
         "total_earned_this_month": float(monthly_earned),
         "total_transactions_this_month": monthly_count,
         "top_category": top_category[0] if top_category else None,
-        "streak_days": 0,  # TODO: Implement streak calculation
+        "streak_days": streak_days,
     })
+
+
+def _calculate_streak_days(wallet_id) -> int:
+    """
+    Ardışık gün sayısını hesapla (son kaç gündür ödül alınmış).
+    
+    Örnek: Bugün, dün ve önceki gün ödül aldıysa streak = 3
+    """
+    from datetime import date, timedelta
+    
+    today = date.today()
+    streak = 0
+    
+    # Son 365 günü kontrol et (makul bir limit)
+    for i in range(365):
+        check_date = today - timedelta(days=i)
+        day_start = datetime.combine(check_date, datetime.min.time())
+        day_end = datetime.combine(check_date, datetime.max.time())
+        
+        # O gün ödül var mı?
+        has_reward = WalletTransaction.query.filter(
+            WalletTransaction.wallet_id == wallet_id,
+            WalletTransaction.transaction_type == "reward",
+            WalletTransaction.amount > 0,
+            WalletTransaction.created_at >= day_start,
+            WalletTransaction.created_at <= day_end
+        ).first()
+        
+        if has_reward:
+            streak += 1
+        else:
+            # Bugün değilse streak kırıldı
+            if i > 0:
+                break
+            # Bugün ödül yoksa streak 0
+    
+    return streak
 
 
 @api_bp.route('/wallet/leaderboard', methods=['GET'])

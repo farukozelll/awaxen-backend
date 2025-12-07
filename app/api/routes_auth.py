@@ -4,7 +4,7 @@ from flask import jsonify, request, current_app
 from . import api_bp
 from .helpers import get_current_user
 from app.extensions import db
-from app.models import User, Organization, Wallet
+from app.models import User, Organization, Wallet, Role
 from app.auth import requires_auth
 
 
@@ -20,20 +20,46 @@ def get_my_profile():
       - bearerAuth: []
     responses:
       200:
-        description: Kullanıcı profili ve organizasyon bilgisi
+        description: Kullanıcı profili, rol ve yetki bilgisi
+        schema:
+          type: object
+          properties:
+            id:
+              type: string
+              example: "550e8400-e29b-41d4-a716-446655440000"
+            auth0_id:
+              type: string
+              example: "google-oauth2|123456789"
+            email:
+              type: string
+              example: "user@awaxen.com"
+            full_name:
+              type: string
+              example: "Ahmet Yılmaz"
+            role:
+              type: object
+              properties:
+                code:
+                  type: string
+                  example: "admin"
+                name:
+                  type: string
+                  example: "Admin"
+            permissions:
+              type: array
+              items:
+                type: string
+              example: ["can_view_devices", "can_edit_devices"]
+            organization:
+              type: object
+      401:
+        description: Yetkisiz erişim
     """
     user = get_current_user()
     if not user:
         return jsonify({"error": "User not found"}), 401
 
-    response = {
-        "id": str(user.id),
-        "auth0_id": user.auth0_id,
-        "email": user.email,
-        "full_name": user.full_name,
-        "role": user.role,
-        "organization_id": str(user.organization_id) if user.organization_id else None,
-    }
+    response = user.to_dict(include_permissions=True)
     
     # Organizasyon bilgisini de ekle
     if user.organization:
@@ -52,7 +78,8 @@ def sync_user():
     """
     Auth0 kullanıcısını Postgres ile senkronize et (Upsert).
     
-    İlk girişte kullanıcı ve varsayılan organizasyon oluşturulur.
+    İlk girişte kullanıcı, organizasyon ve cüzdan oluşturulur.
+    Auth0'dan gelen rol, veritabanındaki roles tablosundan eşleştirilir.
     ---
     tags:
       - Auth
@@ -61,29 +88,63 @@ def sync_user():
     parameters:
       - in: header
         name: X-Auth0-Id
-        required: false
         type: string
+        description: Auth0 kullanıcı ID'si (alternatif olarak body'de gönderilebilir)
+      - in: header
+        name: X-Auth0-Email
+        type: string
+        description: Kullanıcı email adresi
+      - in: header
+        name: X-Auth0-Name
+        type: string
+        description: Kullanıcı tam adı
       - in: body
-        name: payload
+        name: body
         required: true
         schema:
           type: object
+          required:
+            - auth0_id
+            - email
           properties:
             auth0_id:
               type: string
-              example: google-oauth2|123
+              description: Auth0 kullanıcı ID'si
+              example: "google-oauth2|123456789"
             email:
               type: string
-              example: user@awaxen.com
+              description: Kullanıcı email adresi
+              example: "user@awaxen.com"
             name:
               type: string
-              example: Awaxen User
+              description: Kullanıcı tam adı
+              example: "Ahmet Yılmaz"
             role:
               type: string
-              example: super_admin
+              description: Auth0'dan gelen rol kodu
+              enum: [super_admin, admin, operator, viewer, farmer]
+              example: "admin"
     responses:
       200:
-        description: Kullanıcı bilgileri senkronize edildi
+        description: Mevcut kullanıcı güncellendi
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "synced"
+            message:
+              type: string
+            user:
+              type: object
+            organization:
+              type: object
+      201:
+        description: Yeni kullanıcı oluşturuldu
+      400:
+        description: Eksik parametre (auth0_id veya email)
+      500:
+        description: Sunucu hatası
     """
     try:
         payload = request.get_json(silent=True) or {}
@@ -103,36 +164,46 @@ def sync_user():
             user.email = email
             user.full_name = full_name or user.full_name
 
-            if frontend_role == 'super_admin' and user.role != 'admin':
-                user.role = 'admin'
+            # Auth0'dan gelen rolü veritabanından bul ve ata
+            if frontend_role:
+                role_db = Role.get_by_code(frontend_role)
+                if role_db:
+                    user.role_id = role_db.id
+                    current_app.logger.info(f"[AuthSync] Rol güncellendi: {frontend_role}")
 
             db.session.commit()
 
             return jsonify({
                 "status": "synced",
                 "message": "Kullanıcı güncellendi",
-                "user": {
-                    "id": str(user.id),
-                    "auth0_id": user.auth0_id,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "role": user.role,
-                    "organization_id": str(user.organization_id) if user.organization_id else None,
-                },
-                "organization": {
-                    "id": str(user.organization.id),
-                    "name": user.organization.name,
-                    "type": user.organization.type,
-                    "subscription_plan": user.organization.subscription_plan,
-                } if user.organization else None,
+                "user": user.to_dict(include_permissions=True),
+                "organization": user.organization.to_dict() if user.organization else None,
             }), 200
 
         current_app.logger.info(f"[AuthSync] Yeni kullanıcı oluşturuluyor: {email}")
 
+        # Rol belirleme mantığı:
+        # 1. İlk kullanıcı otomatik super_admin olur
+        # 2. Auth0'dan gelen rol varsa veritabanından bul
+        # 3. Yoksa varsayılan viewer
         user_count = User.query.count()
-        final_role = 'admin' if user_count == 0 else 'viewer'
-        if frontend_role == 'super_admin':
-            final_role = 'admin'
+        
+        if user_count == 0:
+            role_code = 'super_admin'
+        elif frontend_role:
+            role_code = frontend_role
+        else:
+            role_code = 'viewer'
+        
+        # Rolü veritabanından bul
+        role_db = Role.get_by_code(role_code)
+        if not role_db:
+            # Varsayılan roller yoksa oluştur
+            Role.seed_default_roles()
+            role_db = Role.get_by_code(role_code)
+        
+        if not role_db:
+            role_db = Role.get_by_code('viewer')  # Son çare
 
         org = Organization(
             name=f"{full_name or email}'s Home",
@@ -147,7 +218,7 @@ def sync_user():
             auth0_id=auth0_id,
             email=email,
             full_name=full_name or 'New User',
-            role=final_role,
+            role_id=role_db.id if role_db else None,
             organization_id=org.id,
         )
         db.session.add(user)
@@ -164,20 +235,8 @@ def sync_user():
         return jsonify({
             "status": "created",
             "message": "Kullanıcı ve organizasyon oluşturuldu",
-            "user": {
-                "id": str(user.id),
-                "auth0_id": user.auth0_id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "role": user.role,
-                "organization_id": str(user.organization_id),
-            },
-            "organization": {
-                "id": str(org.id),
-                "name": org.name,
-                "type": org.type,
-                "subscription_plan": org.subscription_plan,
-            },
+            "user": user.to_dict(include_permissions=True),
+            "organization": org.to_dict(),
         }), 201
 
     except Exception as exc:

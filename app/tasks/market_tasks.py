@@ -30,9 +30,13 @@ def fetch_epias_prices(self):
         prices = epias_service.get_mcp(today)
         
         if prices is None:
-            # API hatası, mock data kullan
-            logger.warning("EPİAŞ API hatası, mock data kullanılıyor")
-            prices = _generate_mock_prices(today.strftime("%Y-%m-%d"))
+            # API hatası - boş liste ile devam et, mock data kullanma
+            logger.warning("EPİAŞ API hatası - veri alınamadı")
+            return {
+                'status': 'warning',
+                'date': today.strftime("%Y-%m-%d"),
+                'message': 'EPİAŞ API yanıt vermedi, veri alınamadı'
+            }
         
         saved_count = 0
         for price_data in prices:
@@ -136,41 +140,8 @@ def fetch_tomorrow_prices(self):
         return {'status': 'error', 'error': str(e)}
 
 
-def _generate_mock_prices(date_str: str) -> list:
-    """
-    Test için mock fiyat verisi üret.
-    
-    Gerçek EPİAŞ entegrasyonu yapıldığında bu fonksiyon kaldırılacak.
-    """
-    import random
-    from datetime import datetime
-    
-    prices = []
-    base_date = datetime.strptime(date_str, "%Y-%m-%d")
-    
-    # Saatlik fiyatlar (0-23)
-    for hour in range(24):
-        time = base_date.replace(hour=hour, minute=0, second=0, microsecond=0)
-        
-        # Gerçekçi fiyat simülasyonu
-        # Gece (22-06): Düşük fiyat
-        # Gündüz (06-17): Orta fiyat  
-        # Puant (17-22): Yüksek fiyat
-        if 22 <= hour or hour < 6:
-            base_price = random.uniform(1.0, 1.8)  # Gece
-        elif 17 <= hour < 22:
-            base_price = random.uniform(3.5, 5.5)  # Puant
-        else:
-            base_price = random.uniform(2.0, 3.0)  # Gündüz
-        
-        prices.append({
-            'time': time,
-            'price': round(base_price, 2),
-            'ptf': round(base_price * 1000, 2),  # TL/MWh
-            'smf': round(base_price * 1000 * 1.05, 2),  # SMF genelde PTF'den biraz yüksek
-        })
-    
-    return prices
+# Mock data fonksiyonu kaldırıldı - Sistem tamamen dinamik çalışıyor
+# EPİAŞ API'den veri alınamazsa boş yanıt dönülür
 
 
 @celery.task
