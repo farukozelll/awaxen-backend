@@ -99,7 +99,22 @@ def list_automations():
 @requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Otomasyon detayı"
+    "summary": "Otomasyon detayı",
+    "parameters": [
+        {
+            "name": "automation_id",
+            "in": "path",
+            "required": True,
+            "type": "string",
+            "description": "Otomasyon UUID"
+        }
+    ],
+    "responses": {
+        200: {"description": "Otomasyon bilgileri"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetkisiz organizasyon"},
+        404: {"description": "Otomasyon bulunamadı"}
+    }
 })
 def get_automation(automation_id):
     """Tek bir otomasyonun detaylarını getir."""
@@ -320,9 +335,25 @@ def delete_automation(automation_id):
 
 
 @automations_bp.route("/automations/<uuid:automation_id>/toggle", methods=["POST"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Otomasyonu aç/kapat"
+    "summary": "Otomasyonu aç/kapat",
+    "parameters": [
+        {
+            "name": "automation_id",
+            "in": "path",
+            "required": True,
+            "type": "string",
+            "description": "Otomasyon UUID"
+        }
+    ],
+    "responses": {
+        200: {"description": "Otomasyon durumu değiştirildi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetkisiz organizasyon"},
+        404: {"description": "Otomasyon bulunamadı"}
+    }
 })
 def toggle_automation(automation_id):
     """Otomasyonu aktif/pasif yap."""
@@ -346,10 +377,26 @@ def toggle_automation(automation_id):
 
 
 @automations_bp.route("/automations/<uuid:automation_id>/test", methods=["POST"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
     "summary": "Otomasyonu test et",
-    "description": "Kuralları değerlendirir ama aksiyonu çalıştırmaz."
+    "description": "Kuralları değerlendirir ama aksiyonu çalıştırmaz.",
+    "parameters": [
+        {
+            "name": "automation_id",
+            "in": "path",
+            "required": True,
+            "type": "string",
+            "description": "Otomasyon UUID"
+        }
+    ],
+    "responses": {
+        200: {"description": "Test sonucu"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetkisiz organizasyon"},
+        404: {"description": "Otomasyon bulunamadı"}
+    }
 })
 def test_automation(automation_id):
     """
@@ -379,9 +426,25 @@ def test_automation(automation_id):
 
 
 @automations_bp.route("/automations/<uuid:automation_id>/run", methods=["POST"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Otomasyonu manuel çalıştır"
+    "summary": "Otomasyonu manuel çalıştır",
+    "parameters": [
+        {
+            "name": "automation_id",
+            "in": "path",
+            "required": True,
+            "type": "string",
+            "description": "Otomasyon UUID"
+        }
+    ],
+    "responses": {
+        200: {"description": "Çalıştırma sonucu"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetkisiz organizasyon"},
+        404: {"description": "Otomasyon bulunamadı"}
+    }
 })
 def run_automation(automation_id):
     """
@@ -408,9 +471,32 @@ def run_automation(automation_id):
 
 
 @automations_bp.route("/automations/<uuid:automation_id>/logs", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Otomasyon loglarını getir"
+    "summary": "Otomasyon loglarını getir",
+    "parameters": [
+        {
+            "name": "automation_id",
+            "in": "path",
+            "required": True,
+            "type": "string",
+            "description": "Otomasyon UUID"
+        },
+        {
+            "name": "limit",
+            "in": "query",
+            "type": "integer",
+            "default": 50,
+            "description": "Döndürülecek maksimum log sayısı"
+        }
+    ],
+    "responses": {
+        200: {"description": "Log listesi"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetkisiz organizasyon"},
+        404: {"description": "Otomasyon bulunamadı"}
+    }
 })
 def get_automation_logs(automation_id):
     """Otomasyonun çalışma geçmişini getir."""
@@ -433,9 +519,13 @@ def get_automation_logs(automation_id):
 
 
 @automations_bp.route("/automations/templates", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Automations"],
-    "summary": "Hazır otomasyon şablonları"
+    "summary": "Hazır otomasyon şablonları",
+    "responses": {
+        200: {"description": "Şablon listesi"}
+    }
 })
 def get_automation_templates():
     """Kullanıcının hızlıca uygulayabileceği hazır şablonlar."""
