@@ -112,17 +112,13 @@ def get_current_price():
               format: date
       401:
         description: Yetkisiz erişim
-      404:
-        description: Bu saat için fiyat bulunamadı
     """
     user = get_or_create_user()
     if not user:
         return jsonify({"error": "Kullanıcı bulunamadı"}), 401
 
+    # get_current_market_price artık her zaman bir değer döner (fallback mekanizması)
     price = get_current_market_price()
-    if not price:
-        return jsonify({"error": "Bu saat için fiyat bulunamadı"}), 404
-
     return jsonify(price)
 
 

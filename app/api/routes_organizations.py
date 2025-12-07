@@ -146,7 +146,8 @@ def list_organizations():
     
     query = Organization.query
     
-    if user.role != "superadmin":
+    user_role_code = user.role.code if user.role else None
+    if user_role_code != "super_admin":
         query = query.filter_by(id=user.organization_id)
     
     if is_active is not None:
@@ -166,6 +167,7 @@ def list_organizations():
 
 
 @organizations_bp.route("/organizations/<uuid:org_id>", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Organizations"],
     "summary": "Organizasyon detayı",
@@ -188,13 +190,15 @@ def get_organization(org_id):
     org = Organization.query.get_or_404(org_id)
     
     # Yetki kontrolü
-    if user.role != "superadmin" and user.organization_id != org.id:
+    user_role_code = user.role.code if user.role else None
+    if user_role_code != "super_admin" and user.organization_id != org.id:
         return jsonify({"error": "Forbidden"}), 403
     
     return jsonify(org.to_dict())
 
 
 @organizations_bp.route("/organizations", methods=["POST"])
+@requires_auth
 @swag_from({
     "tags": ["Organizations"],
     "summary": "Yeni organizasyon oluştur",
@@ -262,6 +266,7 @@ def create_organization():
 
 
 @organizations_bp.route("/organizations/<uuid:org_id>", methods=["PUT"])
+@requires_auth
 @swag_from({
     "tags": ["Organizations"],
     "summary": "Organizasyonu güncelle",
@@ -315,7 +320,7 @@ def update_organization(org_id):
         org.location = data["location"]
     if "settings" in data:
         org.settings = data["settings"]
-    if "subscription_plan" in data and user.role == "superadmin":
+    if "subscription_plan" in data and user_role_code == "super_admin":
         org.subscription_plan = data["subscription_plan"]
     
     db.session.commit()
@@ -324,6 +329,7 @@ def update_organization(org_id):
 
 
 @organizations_bp.route("/organizations/<uuid:org_id>", methods=["DELETE"])
+@requires_auth
 @swag_from({
     "tags": ["Organizations"],
     "summary": "Organizasyonu sil (soft delete)",
@@ -345,8 +351,9 @@ def delete_organization(org_id):
     
     org = Organization.query.get_or_404(org_id)
     
-    # Sadece superadmin silebilir
-    if user.role != "superadmin":
+    # Sadece super_admin silebilir
+    user_role_code = user.role.code if user.role else None
+    if user_role_code != "super_admin":
         return jsonify({"error": "Forbidden"}), 403
     
     org.is_active = False
@@ -356,6 +363,7 @@ def delete_organization(org_id):
 
 
 @organizations_bp.route("/organizations/<uuid:org_id>/users", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Organizations"],
     "summary": "Organizasyondaki kullanıcıları listele",
@@ -417,7 +425,8 @@ def list_organization_users(org_id):
     org = Organization.query.get_or_404(org_id)
     
     # Yetki kontrolü
-    if user.role != "superadmin" and user.organization_id != org.id:
+    user_role_code = user.role.code if user.role else None
+    if user_role_code != "super_admin" and user.organization_id != org.id:
         return jsonify({"error": "Forbidden"}), 403
     
     page, page_size = get_pagination_params()
@@ -435,6 +444,7 @@ def list_organization_users(org_id):
 
 
 @organizations_bp.route("/organizations/<uuid:org_id>/stats", methods=["GET"])
+@requires_auth
 @swag_from({
     "tags": ["Organizations"],
     "summary": "Organizasyon istatistikleri",
@@ -463,7 +473,8 @@ def get_organization_stats(org_id):
     org = Organization.query.get_or_404(org_id)
     
     # Yetki kontrolü
-    if user.role != "superadmin" and user.organization_id != org.id:
+    user_role_code = user.role.code if user.role else None
+    if user_role_code != "super_admin" and user.organization_id != org.id:
         return jsonify({"error": "Forbidden"}), 403
     
     from app.models import SmartDevice, SmartAsset, Integration, Automation

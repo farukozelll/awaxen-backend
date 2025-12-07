@@ -225,6 +225,14 @@ class Role(db.Model):
             # Dashboard
             ("can_view_dashboard", "Dashboard Görüntüle", "dashboard", "Ana panel"),
             ("can_view_analytics", "Analitik Görüntüle", "analytics", "Raporlar ve grafikler"),
+            
+            # Tarife yetkileri
+            ("can_view_tariffs", "Tarifeleri Görüntüle", "tariffs", "Elektrik tarifelerini görüntüleme"),
+            ("can_manage_tariffs", "Tarife Yönet", "tariffs", "Tarife ekleme/düzenleme"),
+            
+            # Organizasyon yetkileri
+            ("can_view_organizations", "Organizasyonları Görüntüle", "organizations", "Organizasyon listesi"),
+            ("can_manage_organizations", "Organizasyon Yönet", "organizations", "Organizasyon ekleme/düzenleme"),
         ]
         
         permissions_map = {}
@@ -261,6 +269,8 @@ class Role(db.Model):
                     "can_view_settings", "can_edit_settings",
                     "can_view_users", "can_manage_users",
                     "can_view_dashboard", "can_view_analytics",
+                    "can_view_tariffs", "can_manage_tariffs",
+                    "can_view_organizations",
                 ],
             },
             {
@@ -370,7 +380,7 @@ class Organization(db.Model):
     devices = db.relationship("SmartDevice", backref="organization", lazy=True)
     assets = db.relationship("SmartAsset", backref="organization", lazy=True)
     automations = db.relationship("Automation", backref="organization", lazy=True)
-    tariffs = db.relationship("ElectricityTariff", backref="organization", lazy=True)
+    #tariffs = db.relationship("ElectricityTariff", backref="organization", lazy=True)
     audit_logs = db.relationship("AuditLog", backref="organization", lazy=True)
 
     def to_dict(self):

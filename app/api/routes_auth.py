@@ -8,6 +8,21 @@ from app.models import User, Organization, Wallet, Role
 from app.auth import requires_auth
 
 
+# Auth0 Rol İsimleri -> Awaxen DB Rol Kodları Eşleşmesi
+# Auth0'da farklı isimlerle tanımlanan roller, veritabanındaki rol kodlarına eşleştirilir
+AUTH0_ROLE_MAPPING = {
+    "super_admin": "super_admin",
+    "superadmin": "super_admin",  # Alternatif yazım
+    "admin": "admin",
+    "farmer-user": "farmer",
+    "farmer": "farmer",
+    "solar-user": "operator",
+    "operator": "operator",
+    "demo-user": "viewer",
+    "viewer": "viewer",
+}
+
+
 @api_bp.route('/auth/me', methods=['GET'])
 @requires_auth
 def get_my_profile():
@@ -164,12 +179,13 @@ def sync_user():
             user.email = email
             user.full_name = full_name or user.full_name
 
-            # Auth0'dan gelen rolü veritabanından bul ve ata
+            # Auth0'dan gelen rolü eşleştir ve veritabanından bul
             if frontend_role:
-                role_db = Role.get_by_code(frontend_role)
+                mapped_role_code = AUTH0_ROLE_MAPPING.get(frontend_role, frontend_role)
+                role_db = Role.get_by_code(mapped_role_code)
                 if role_db:
                     user.role_id = role_db.id
-                    current_app.logger.info(f"[AuthSync] Rol güncellendi: {frontend_role}")
+                    current_app.logger.info(f"[AuthSync] Rol güncellendi: {frontend_role} -> {mapped_role_code}")
 
             db.session.commit()
 
@@ -191,7 +207,8 @@ def sync_user():
         if user_count == 0:
             role_code = 'super_admin'
         elif frontend_role:
-            role_code = frontend_role
+            # Auth0 rol ismini veritabanı rol koduna eşleştir
+            role_code = AUTH0_ROLE_MAPPING.get(frontend_role, frontend_role)
         else:
             role_code = 'viewer'
         
