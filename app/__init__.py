@@ -7,6 +7,7 @@ from flasgger import Swagger
 
 # Extensions'dan import et (circular import önleme)
 from .extensions import db, migrate, socketio, celery, init_celery
+from .version import APP_VERSION
 
 
 def _env_flag(value: Optional[str], default: bool = True) -> bool:
@@ -42,7 +43,8 @@ def create_app():
         
         # Swagger
         SWAGGER={
-            "title": "Awaxen IoT Platform API v6.0",
+            "title": "Awaxen IoT Platform API",
+            "version": APP_VERSION,
             "uiversion": 3,
             "description": "Hibrit Enerji Yönetim Platformu - SaaS Backend",
             "securityDefinitions": {
@@ -65,6 +67,8 @@ def create_app():
         MQTT_CLIENT_ID=os.getenv("MQTT_CLIENT_ID", "awaxen-backend"),
         MQTT_AUTO_START=_env_flag(os.getenv("MQTT_AUTO_START", "true")),
     )
+
+    app.config["APP_VERSION"] = APP_VERSION
 
     db.init_app(app)
     migrate.init_app(app, db)

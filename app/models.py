@@ -109,6 +109,9 @@ class Organization(db.Model):
     devices = db.relationship("SmartDevice", backref="organization", lazy=True)
     assets = db.relationship("SmartAsset", backref="organization", lazy=True)
     automations = db.relationship("Automation", backref="organization", lazy=True)
+    tariffs = db.relationship("ElectricityTariff", backref="organization", lazy=True)
+    audit_logs = db.relationship("AuditLog", backref="organization", lazy=True)
+    tariffs = db.relationship("ElectricityTariff", backref="organization", lazy=True)
 
     def to_dict(self):
         return {

@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any, Optional
+from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 
@@ -202,8 +203,19 @@ def init_mqtt_client(app, max_retries: int = 5, retry_delay: float = 2.0):
     broker_host = _sanitize_broker_url(raw_url)
     port = int(app.config.get("MQTT_BROKER_PORT", 1883))
 
+    base_client_id = app.config.get("MQTT_CLIENT_ID", "awaxen-backend")
+    suffix = uuid4().hex[:6]
+    max_len = 23  # MQTT spec limit for client IDs
+    max_base_len = max_len - len(suffix) - 1  # leave room for "-" and suffix
+    if max_base_len < 1:
+        max_base_len = max_len
+    trimmed_base = (base_client_id or "awaxen-backend")[:max_base_len]
+    if not trimmed_base:
+        trimmed_base = "awaxen"
+    unique_client_id = f"{trimmed_base}-{suffix}"
+
     client = mqtt.Client(
-        client_id=app.config.get("MQTT_CLIENT_ID", "awaxen-backend"),
+        client_id=unique_client_id,
         clean_session=True
     )
 
