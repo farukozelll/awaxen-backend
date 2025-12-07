@@ -292,6 +292,8 @@ class Integration(db.Model):
             "is_active": self.is_active,
         }
         if include_tokens:
+            data["access_token"] = self.access_token
+            data["refresh_token"] = self.refresh_token
             data["has_access_token"] = bool(self._access_token)
             data["has_refresh_token"] = bool(self._refresh_token)
         return data

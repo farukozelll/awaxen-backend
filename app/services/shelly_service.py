@@ -4,7 +4,8 @@ Shelly Cloud Service - Shelly cihazlarını kontrol et.
 Shelly Cloud API: https://shelly-api-docs.shelly.cloud/cloud-control-api/
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
+
 import requests
 
 from app.extensions import db
@@ -21,7 +22,6 @@ class ShellyService:
         service.get_device_status(device)
     """
     
-    BASE_URL = "https://shelly-cloud-eu.shelly.cloud"
     TIMEOUT = 30
     
     def __init__(self, integration: Integration):
@@ -35,17 +35,31 @@ class ShellyService:
         self.integration = integration
         self.auth_key = integration.access_token
         
-        # Server URI (EU, US, etc.)
         provider_data = integration.provider_data or {}
-        self.server_uri = provider_data.get('server_uri', 'shelly-cloud-eu.shelly.cloud')
-        self.base_url = f"https://{self.server_uri}"
+        self.base_url = self._normalize_base_url(provider_data.get("server_uri"))
+    
+    @staticmethod
+    def _normalize_base_url(server_uri: Optional[str]) -> str:
+        """
+        Shelly hesabına özel Server URI'yi normalize et.
+        Kullanıcı http/https veya trailing slash bırakmış olabilir.
+        """
+        default = "https://shelly-cloud-eu.shelly.cloud"
+        if not server_uri:
+            return default
+        server_uri = server_uri.strip()
+        if not server_uri:
+            return default
+        if not server_uri.startswith(("http://", "https://")):
+            server_uri = f"https://{server_uri}"
+        return server_uri.rstrip("/")
     
     def _make_request(self, endpoint: str, data: dict = None) -> dict:
         """API isteği yap."""
         if not self.auth_key:
             raise ValueError("No access token available")
         
-        url = f"{self.base_url}/{endpoint}"
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
         payload = {'auth_key': self.auth_key}
         if data:
             payload.update(data)
@@ -61,7 +75,10 @@ class ShellyService:
     
     def get_all_devices(self) -> list:
         """Tüm cihazları listele."""
-        data = self._make_request('device/all_status')
+        data = self._make_request('device/all_status', {
+            'show_info': 'true',
+            'no_shared': 'true',
+        })
         return data.get('devices_status', {})
     
     def get_device_status(self, device: SmartDevice) -> dict:
@@ -180,58 +197,77 @@ class ShellyService:
         synced = []
         
         for device_id, device_info in devices_data.items():
-            # Mevcut cihazı bul veya oluştur
+            device_meta = device_info.get('_dev_info', {})
+            cloud_info = device_info.get('cloud', {}) or {}
+            wifi_info = device_info.get('wifi', {}) or {}
+            sys_info = device_info.get('sys', {}) or {}
+            
+            name = device_info.get('name') or device_info.get('device_name') or f"Shelly {device_id[-4:]}"
+            device_code = device_meta.get('code') or device_info.get('model', 'unknown')
+            device_type = self._infer_device_type(device_code)
+            is_online = cloud_info.get('connected', False)
+            
             existing = SmartDevice.query.filter_by(
                 integration_id=self.integration.id,
                 external_id=device_id
             ).first()
             
-            cloud_info = device_info.get('cloud', {})
-            sys_info = device_info.get('sys', {})
-            wifi_info = device_info.get('wifi', {})
+            settings_payload: Dict[str, Any] = {
+                "gen": device_meta.get('gen', 'G1'),
+                "ip": wifi_info.get('sta_ip') or device_info.get('ip'),
+                "mac": sys_info.get('mac') or device_info.get('mac'),
+                "fw_id": sys_info.get('fw_id'),
+            }
             
             if existing:
-                # Güncelle
-                existing.is_online = cloud_info.get('connected', False)
+                existing.name = name
+                existing.brand = 'shelly'
+                existing.model = device_code
+                existing.device_type = device_type
+                existing.is_online = is_online
                 existing.last_seen = datetime.utcnow()
-                existing.metadata = {
-                    **existing.metadata,
-                    'firmware': sys_info.get('fw_id'),
-                    'ip': wifi_info.get('sta_ip'),
-                    'mac': sys_info.get('mac'),
-                }
+                existing.settings = {**(existing.settings or {}), **{k: v for k, v in settings_payload.items() if v}}
             else:
-                # Yeni cihaz
                 new_device = SmartDevice(
                     organization_id=self.integration.organization_id,
                     integration_id=self.integration.id,
                     external_id=device_id,
-                    name=device_info.get('name', f'Shelly {device_id[-4:]}'),
+                    name=name,
                     brand='shelly',
-                    model=device_info.get('model', 'unknown'),
+                    model=device_code,
                     is_sensor=True,
                     is_actuator=True,
-                    is_online=cloud_info.get('connected', False),
+                    is_online=is_online,
+                    device_type=device_type,
                     last_seen=datetime.utcnow(),
-                    metadata={
-                        'firmware': sys_info.get('fw_id'),
-                        'ip': wifi_info.get('sta_ip'),
-                        'mac': sys_info.get('mac'),
-                    }
+                    settings={k: v for k, v in settings_payload.items() if v},
                 )
                 db.session.add(new_device)
             
             synced.append({
                 'external_id': device_id,
-                'name': device_info.get('name'),
-                'online': cloud_info.get('connected', False)
+                'name': name,
+                'model': device_code,
+                'online': is_online,
             })
         
-        # Son senkronizasyon zamanını güncelle
         self.integration.last_sync_at = datetime.utcnow()
         db.session.commit()
         
         return synced
+    
+    @staticmethod
+    def _infer_device_type(device_code: Optional[str]) -> str:
+        if not device_code:
+            return "relay"
+        code = device_code.upper()
+        if "THERM" in code or "TRV" in code:
+            return "thermostat"
+        if "PM" in code or "EM" in code:
+            return "meter"
+        if "RGB" in code or "DIM" in code:
+            return "lighting"
+        return "relay"
 
 
 def get_shelly_service(organization_id: str) -> Optional[ShellyService]:

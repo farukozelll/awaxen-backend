@@ -19,6 +19,51 @@ from app.auth import requires_auth
 
 organizations_bp = Blueprint("organizations", __name__)
 
+ORGANIZATION_SWAGGER_DEFINITIONS = {
+    "Organization": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "format": "uuid"},
+            "name": {"type": "string"},
+            "slug": {"type": "string"},
+            "type": {"type": "string", "example": "home"},
+            "timezone": {"type": "string", "example": "Europe/Istanbul"},
+            "location": {"type": "object"},
+            "subscription_status": {"type": "string", "example": "active"},
+            "subscription_plan": {"type": "string", "example": "pro"},
+            "is_active": {"type": "boolean"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    },
+    "User": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "format": "uuid"},
+            "organization_id": {"type": "string", "format": "uuid"},
+            "email": {"type": "string", "format": "email"},
+            "full_name": {"type": "string"},
+            "phone_number": {"type": "string"},
+            "telegram_username": {"type": "string"},
+            "role": {
+                "type": "string",
+                "enum": ["superadmin", "admin", "operator", "viewer"],
+                "description": "Kullanıcının platform içindeki rolü",
+            },
+            "is_active": {"type": "boolean"},
+            "created_at": {"type": "string", "format": "date-time"},
+        },
+    },
+    "Pagination": {
+        "type": "object",
+        "properties": {
+            "page": {"type": "integer", "example": 1},
+            "pageSize": {"type": "integer", "example": 20},
+            "total": {"type": "integer", "example": 125},
+            "totalPages": {"type": "integer", "example": 7},
+        },
+    },
+}
+
 
 @organizations_bp.route("/organizations", methods=["GET"])
 @requires_auth
@@ -84,7 +129,8 @@ organizations_bp = Blueprint("organizations", __name__)
             }
         },
         401: {"description": "Yetkisiz erişim"}
-    }
+    },
+    "definitions": ORGANIZATION_SWAGGER_DEFINITIONS,
 })
 def list_organizations():
     """Kullanıcının erişebildiği organizasyonları listele."""
@@ -358,7 +404,8 @@ def delete_organization(org_id):
         401: {"description": "Yetkisiz erişim"},
         403: {"description": "Yetki yok"},
         404: {"description": "Organizasyon bulunamadı"}
-    }
+    },
+    "definitions": ORGANIZATION_SWAGGER_DEFINITIONS,
 })
 def list_organization_users(org_id):
     """Organizasyona ait kullanıcıları listele."""

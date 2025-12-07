@@ -12,6 +12,7 @@ from app.models import (
     Wallet,
     WalletTransaction,
     Notification,
+    AutomationLog,
 )
 
 bp = Blueprint('dashboard', __name__)
@@ -223,3 +224,72 @@ def _get_quick_actions():
         {"id": "mode_comfort", "label": "Konfor Modu", "icon": "sun", "active": True},
         {"id": "all_off", "label": "Hepsini Kapat", "icon": "power", "active": False}
     ]
+
+
+@bp.route("/activity", methods=["GET"])
+@requires_auth
+@swag_from({
+    "tags": ["Dashboard"],
+    "summary": "Activity Log - Son olayları listele",
+    "security": [{"bearerAuth": []}],
+    "parameters": [
+        {
+            "name": "limit",
+            "in": "query",
+            "type": "integer",
+            "default": 20,
+            "description": "Döndürülecek aktivite sayısı (max 100)"
+        }
+    ],
+    "responses": {
+        200: {
+            "description": "Aktivite listesi",
+            "schema": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "type": {"type": "string", "example": "automation"},
+                        "title": {"type": "string"},
+                        "status": {"type": "string", "example": "success"},
+                        "detail": {"type": "string"},
+                        "timestamp": {"type": "string", "format": "date-time"}
+                    }
+                }
+            }
+        },
+        401: {"description": "Yetkisiz erişim"}
+    }
+})
+def get_activity_log():
+    """Dashboard Activity Log endpoint'i."""
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Organizasyon bulunamadı"}), 400
+
+    limit = request.args.get("limit", 20, type=int)
+    limit = max(1, min(limit, 100))
+
+    # Şimdilik otomasyon loglarını temel alıyoruz; ileride farklı kaynaklardan da birleşebilir
+    logs = (
+        AutomationLog.query
+        .filter_by(organization_id=user.organization_id)
+        .order_by(AutomationLog.triggered_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    activities = []
+    for log in logs:
+        activities.append({
+            "id": str(log.id),
+            "type": "automation",
+            "title": log.action_taken or "Otomasyon",
+            "status": log.status,
+            "detail": log.reason,
+            "timestamp": log.triggered_at.isoformat() if log.triggered_at else None,
+            "automation_id": str(log.automation_id),
+        })
+
+    return jsonify(activities)

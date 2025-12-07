@@ -122,7 +122,10 @@ def get_integration(integration_id):
     if integration.organization_id != user.organization_id:
         return jsonify({"error": "Forbidden"}), 403
     
-    return jsonify(integration.to_dict())
+    if integration.provider == "shelly" and not (integration.provider_data or {}).get("server_uri"):
+        return jsonify({"error": "Shelly entegrasyonu için server_uri kaydı bulunamadı"}), 400
+    
+    return jsonify(integration.to_dict(include_tokens=True))
 
 
 @integrations_bp.route("/integrations", methods=["POST"])
@@ -171,6 +174,12 @@ def create_integration():
     if not provider:
         return jsonify({"error": "Provider is required"}), 400
     
+    provider_data = data.get("provider_data", {})
+    if provider == "shelly":
+        server_uri = (provider_data or {}).get("server_uri")
+        if not server_uri:
+            return jsonify({"error": "Shelly entegrasyonları için server_uri alanı zorunludur"}), 400
+    
     # Aynı provider için mevcut entegrasyon var mı?
     existing = Integration.query.filter_by(
         organization_id=user.organization_id,
@@ -184,7 +193,7 @@ def create_integration():
     integration = Integration(
         organization_id=user.organization_id,
         provider=provider,
-        provider_data=data.get("provider_data", {})
+        provider_data=provider_data,
     )
     
     # Token'ları şifreli kaydet
@@ -253,7 +262,7 @@ def update_integration(integration_id):
     
     db.session.commit()
     
-    return jsonify(integration.to_dict())
+    return jsonify(integration.to_dict(include_tokens=True))
 
 
 @integrations_bp.route("/integrations/<uuid:integration_id>", methods=["DELETE"])
