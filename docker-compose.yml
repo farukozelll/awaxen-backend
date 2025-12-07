@@ -72,6 +72,8 @@ services:
       OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
       # Flask
       FLASK_DEBUG: ${FLASK_DEBUG:-false}
+      # Telegram Bot
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     depends_on:
       db:
         condition: service_healthy
@@ -130,7 +132,22 @@ services:
     networks:
       - awaxen_net
 
-  # --- 7. PGADMIN (Veritabanı Yönetim Arayüzü) ---
+  # --- 7. NGROK (Tunnel for Telegram Webhook) ---
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: awaxen_ngrok
+    command: http backend:5000 --log stdout
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    depends_on:
+      - backend
+    restart: always
+    networks:
+      - awaxen_net
+
+  # --- 8. PGADMIN (Veritabanı Yönetim Arayüzü) ---
   pgadmin:
     image: dpage/pgadmin4
     container_name: awaxen_pgadmin

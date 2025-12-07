@@ -1,11 +1,15 @@
 """SmartDevice (Akıllı Cihaz) yönetimi endpoint'leri - v6.0."""
+from datetime import datetime
+from typing import List
+
 from flask import jsonify, request
 
 from . import api_bp
 from .helpers import get_current_user, get_pagination_params, get_filter_params, paginate_response, apply_sorting
-from app.models import SmartDevice
+from app.models import SmartDevice, SmartAsset
 from app.extensions import db
 from app.auth import requires_auth
+from app.services.shelly_service import get_shelly_service
 
 
 @api_bp.route('/devices', methods=['GET'])
@@ -310,3 +314,192 @@ def delete_device(device_id):
     db.session.commit()
     
     return jsonify({"message": "Device deleted"})
+
+
+@api_bp.route('/devices/bulk-action', methods=['POST'])
+@requires_auth
+def bulk_device_action():
+    """
+    Birden fazla cihazı tek istekte kontrol et (örn: tüm cihazları kapat).
+    ---
+    tags:
+      - Devices
+    security:
+      - bearerAuth: []
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - device_ids
+            - action
+          properties:
+            device_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+              example:
+                - "550e8400-e29b-41d4-a716-446655440000"
+                - "550e8400-e29b-41d4-a716-446655440111"
+            action:
+              type: string
+              enum: [on, off, toggle]
+              example: "off"
+            value:
+              type: integer
+              description: Dimmer gibi cihazlar için (opsiyonel)
+              minimum: 0
+              maximum: 100
+    responses:
+      200:
+        description: Bulk aksiyon sonucu
+      400:
+        description: Geçersiz istek
+      401:
+        description: Yetkisiz erişim
+    """
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json() or {}
+    device_ids: List[str] = data.get("device_ids") or []
+    action = data.get("action")
+    value = data.get("value")
+
+    if not device_ids or not isinstance(device_ids, list):
+        return jsonify({"error": "device_ids array is required"}), 400
+    if action not in ["on", "off", "toggle"]:
+        return jsonify({"error": "Invalid action"}), 400
+
+    devices = SmartDevice.query.filter(
+        SmartDevice.id.in_(device_ids),
+        SmartDevice.organization_id == user.organization_id,
+        SmartDevice.is_active == True,
+    ).all()
+
+    if not devices:
+        return jsonify({"error": "No devices found or access denied"}), 404
+
+    results = []
+    for device in devices:
+        success = True
+        message = "OK"
+
+        if device.brand == "shelly":
+            service = get_shelly_service(str(device.organization_id))
+            if not service:
+                success = False
+                message = "Shelly integration not configured"
+            else:
+                try:
+                    if action == "on":
+                        success = service.turn_on(device)
+                    elif action == "off":
+                        success = service.turn_off(device)
+                    elif action == "toggle":
+                        success = service.toggle(device)
+
+                    if success and value is not None and device.device_type in ["dimmer", "rgbw"]:
+                        success = service.set_power_limit(device, int(value))
+                except Exception as exc:
+                    success = False
+                    message = str(exc)
+        else:
+            # Placeholder - farklı markalar için ileride eklenecek
+            success = True
+            message = f"{device.brand or 'device'} control not implemented, skipping"
+
+        if success:
+            device.last_seen = datetime.utcnow()
+        results.append({
+            "device_id": str(device.id),
+            "name": device.name,
+            "success": success,
+            "message": message,
+        })
+
+    db.session.commit()
+    return jsonify({
+        "requested": len(device_ids),
+        "processed": len(results),
+        "results": results,
+    })
+
+
+@api_bp.route('/devices/<uuid:device_id>/health', methods=['GET'])
+@requires_auth
+def get_device_health(device_id):
+    """
+    Cihaz sağlığını ve bağlantı durumunu döndür.
+    ---
+    tags:
+      - Devices
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: device_id
+        in: path
+        required: true
+        type: string
+    responses:
+      200:
+        description: Sağlık bilgisi
+      401:
+        description: Yetkisiz erişim
+      404:
+        description: Cihaz bulunamadı
+    """
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    device = SmartDevice.query.filter_by(
+        id=device_id,
+        organization_id=user.organization_id,
+        is_active=True,
+    ).first()
+
+    if not device:
+        return jsonify({"error": "Device not found"}), 404
+
+    health = {
+        "device_id": str(device.id),
+        "name": device.name,
+        "brand": device.brand,
+        "model": device.model,
+        "is_online": device.is_online,
+        "last_seen": device.last_seen.isoformat() if device.last_seen else None,
+        "gateway_status": None,
+        "integration_status": None,
+        "issues": [],
+    }
+
+    if device.gateway:
+        health["gateway_status"] = {
+            "id": str(device.gateway.id),
+            "status": device.gateway.status,
+            "last_seen": device.gateway.last_seen.isoformat() if device.gateway.last_seen else None,
+        }
+
+    if device.integration:
+        health["integration_status"] = {
+            "id": str(device.integration.id),
+            "provider": device.integration.provider,
+            "status": device.integration.status,
+            "last_sync_at": device.integration.last_sync_at.isoformat() if device.integration.last_sync_at else None,
+        }
+
+    if not device.is_online:
+        health["issues"].append("Device is offline")
+    if device.gateway and device.gateway.status != "online":
+        health["issues"].append("Gateway offline")
+    if device.integration and device.integration.status != "active":
+        health["issues"].append("Integration not active")
+
+    return jsonify(health)

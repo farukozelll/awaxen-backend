@@ -1,5 +1,5 @@
 """Kullanıcı kimlik doğrulama ve profil endpoint'leri - v6.0."""
-from flask import jsonify, request, current_app
+from flask import jsonify, request, current_app, g
 
 from . import api_bp
 from .helpers import get_current_user
@@ -86,6 +86,83 @@ def get_my_profile():
         }
     
     return jsonify(response)
+
+
+@api_bp.route('/auth/me', methods=['PATCH'])
+@requires_auth
+def update_my_profile():
+    """
+    Token'daki kullanıcının profil bilgilerini güncelle.
+    ---
+    tags:
+      - Auth
+    security:
+      - bearerAuth: []
+    consumes:
+      - application/json
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            full_name:
+              type: string
+              example: "Faruk Özelll"
+            phone_number:
+              type: string
+              example: "+905551112233"
+            telegram_username:
+              type: string
+              example: "farukozelll"
+    responses:
+      200:
+        description: Profil güncellendi
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+            user:
+              type: object
+      400:
+        description: Geçersiz veri
+      401:
+        description: Yetkisiz erişim
+    """
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    allowed_fields = ["full_name", "phone_number", "telegram_username"]
+
+    updated = False
+    for field in allowed_fields:
+        if field in data:
+            raw_value = data.get(field)
+            value = raw_value.strip() if isinstance(raw_value, str) and raw_value.strip() != "" else None
+            if field == "telegram_username" and isinstance(value, str):
+                normalized_username = value.lstrip("@").strip()
+                value = normalized_username or None
+            if getattr(user, field) != value:
+                setattr(user, field, value)
+                updated = True
+
+    if not updated:
+        return jsonify({"message": "Değişiklik yapılmadı", "user": user.to_dict(include_permissions=True)}), 200
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "message": "Profil güncellendi",
+            "user": user.to_dict(include_permissions=True),
+        }), 200
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error(f"[Auth] Profile update failed: {exc}")
+        return jsonify({"error": "Profil güncellenemedi"}), 500
 
 
 @api_bp.route('/auth/sync', methods=['POST'])

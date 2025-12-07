@@ -1,6 +1,7 @@
 """Telemetri endpoint'leri - v6.0 (TimescaleDB)."""
 from datetime import datetime, timedelta
 from flask import jsonify, request
+from sqlalchemy import func
 
 from . import api_bp
 from .helpers import get_current_user, parse_iso_datetime
@@ -87,6 +88,8 @@ def get_telemetry_history():
     ---
     tags:
       - Telemetry
+    security:
+      - bearerAuth: []
     parameters:
       - in: query
         name: device_id
@@ -106,6 +109,14 @@ def get_telemetry_history():
         schema:
           type: string
           format: date-time
+      - in: query
+        name: interval
+        required: false
+        schema:
+          type: string
+          enum: [raw, 5m, 15m, 1h, 6h, 1d]
+          default: raw
+        description: "Downsampling aralığı. raw seçilirse ham veriler döner, diğer değerlerde ortalama alınır."
       - in: query
         name: limit
         required: false
@@ -136,6 +147,7 @@ def get_telemetry_history():
     start = parse_iso_datetime(request.args.get('start_date'))
     end = parse_iso_datetime(request.args.get('end_date'))
     limit = request.args.get('limit', 1000, type=int)
+    interval = request.args.get('interval', 'raw')
 
     # Varsayılan: son 24 saat
     if not start:
@@ -143,11 +155,51 @@ def get_telemetry_history():
     if not end:
         end = datetime.utcnow()
 
-    query = DeviceTelemetry.query.filter(
+    base_filters = [
         DeviceTelemetry.device_id == device_id,
         DeviceTelemetry.time >= start,
         DeviceTelemetry.time <= end
-    )
+    ]
+
+    interval_map = {
+        "5m": "5 minutes",
+        "15m": "15 minutes",
+        "1h": "1 hour",
+        "6h": "6 hours",
+        "1d": "1 day",
+    }
+
+    if interval and interval.lower() in interval_map:
+        bucket_interval = interval_map[interval.lower()]
+        bucket = func.time_bucket(bucket_interval, DeviceTelemetry.time).label("bucket")
+
+        agg_query = db.session.query(
+            bucket,
+            func.avg(DeviceTelemetry.power_w).label("power_w"),
+            func.avg(DeviceTelemetry.voltage).label("voltage"),
+            func.avg(DeviceTelemetry.current).label("current"),
+            func.avg(DeviceTelemetry.energy_total_kwh).label("energy_total_kwh"),
+            func.avg(DeviceTelemetry.temperature).label("temperature"),
+            func.avg(DeviceTelemetry.humidity).label("humidity"),
+        ).filter(*base_filters).group_by(bucket).order_by(bucket.asc())
+
+        rows = agg_query.all()
+        response = []
+        for row in rows:
+            response.append({
+                "time": row.bucket.isoformat() if row.bucket else None,
+                "power_w": float(row.power_w) if row.power_w is not None else None,
+                "voltage": float(row.voltage) if row.voltage is not None else None,
+                "current": float(row.current) if row.current is not None else None,
+                "energy_total_kwh": float(row.energy_total_kwh) if row.energy_total_kwh is not None else None,
+                "temperature": float(row.temperature) if row.temperature is not None else None,
+                "humidity": float(row.humidity) if row.humidity is not None else None,
+                "interval": interval.lower(),
+                "aggregated": True,
+            })
+        return jsonify(response)
+
+    query = DeviceTelemetry.query.filter(*base_filters)
 
     records = query.order_by(DeviceTelemetry.time.asc()).limit(limit).all()
 

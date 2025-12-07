@@ -3,7 +3,9 @@ Wallet (Cüzdan) API - Oyunlaştırma ve Ödül Sistemi.
 
 Awaxen Coin (AWX) yönetimi, işlem geçmişi ve seviye sistemi.
 """
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+
 from flask import jsonify, request
 
 from . import api_bp
@@ -333,7 +335,6 @@ def get_wallet_stats():
       401:
         description: Yetkisiz erişim
     """
-    from datetime import datetime, timedelta
     from sqlalchemy import func
     
     user = get_current_user()
@@ -394,8 +395,6 @@ def _calculate_streak_days(wallet_id) -> int:
     
     Örnek: Bugün, dün ve önceki gün ödül aldıysa streak = 3
     """
-    from datetime import date, timedelta
-    
     today = date.today()
     streak = 0
     

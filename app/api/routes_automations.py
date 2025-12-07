@@ -148,6 +148,95 @@ def get_automation(automation_id):
     return jsonify(result)
 
 
+@automations_bp.route("/automations/reorder", methods=["PUT"])
+@requires_auth
+@swag_from({
+    "tags": ["Automations"],
+    "summary": "Otomasyonların öncelik sırasını güncelle",
+    "security": [{"bearerAuth": []}],
+    "consumes": ["application/json"],
+    "parameters": [
+        {
+            "name": "body",
+            "in": "body",
+            "required": True,
+            "schema": {
+                "type": "object",
+                "required": ["orders"],
+                "properties": {
+                    "orders": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["automation_id"],
+                            "properties": {
+                                "automation_id": {"type": "string", "format": "uuid"},
+                                "priority": {
+                                    "type": "integer",
+                                    "example": 10,
+                                    "description": "Düşük sayı = yüksek öncelik"
+                                }
+                            }
+                        },
+                        "example": [
+                            {"automation_id": "550e8400-e29b-41d4-a716-446655440000", "priority": 10},
+                            {"automation_id": "550e8400-e29b-41d4-a716-446655440111", "priority": 20}
+                        ]
+                    }
+                }
+            }
+        }
+    ],
+    "responses": {
+        200: {"description": "Öncelikler güncellendi"},
+        400: {"description": "Geçersiz istek"},
+        401: {"description": "Yetkisiz erişim"}
+    }
+})
+def reorder_automations():
+    """Otomasyonların çalışma önceliğini güncelle."""
+    user = get_current_user()
+    if not user or not user.organization_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json() or {}
+    orders = payload.get("orders") or []
+
+    if not isinstance(orders, list) or not orders:
+        return jsonify({"error": "orders list is required"}), 400
+
+    updated = []
+    for item in orders:
+        automation_id = item.get("automation_id")
+        if not automation_id:
+            continue
+
+        automation = Automation.query.filter_by(
+            id=automation_id,
+            organization_id=user.organization_id
+        ).first()
+
+        if not automation:
+            continue
+
+        requested_priority = item.get("priority")
+        if requested_priority is None:
+            # Eğer priority verilmediyse listedeki sırasına göre atayalım
+            requested_priority = 100 + len(updated) * 10
+
+        automation.priority = int(requested_priority)
+        updated.append(automation_id)
+
+    if not updated:
+        return jsonify({"error": "No automations updated"}), 400
+
+    db.session.commit()
+    return jsonify({
+        "message": "Automation priorities updated",
+        "updated_ids": updated
+    })
+
+
 @automations_bp.route("/automations", methods=["POST"])
 @requires_auth
 @swag_from({
@@ -162,13 +251,94 @@ def get_automation(automation_id):
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "example": "Ucuz Saatte Şarj"},
+                    "description": {"type": "string", "example": "Piyasa fiyatı düşünce aracı şarj et"},
                     "asset_id": {"type": "string"},
                     "rules": {
                         "type": "object",
+                        "required": ["trigger", "actions"],
+                        "properties": {
+                            "trigger": {
+                                "type": "object",
+                                "required": ["type", "operator", "value"],
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["price", "sensor", "time_range"],
+                                        "example": "price"
+                                    },
+                                    "operator": {
+                                        "type": "string",
+                                        "enum": ["<", ">", "<=", ">=", "=="],
+                                        "example": "<"
+                                    },
+                                    "value": {
+                                        "type": "number",
+                                        "example": 2.5
+                                    },
+                                    "sensor_field": {
+                                        "type": "string",
+                                        "description": "sensor tetikleyiciler için alan adı",
+                                        "example": "temperature"
+                                    }
+                                }
+                            },
+                            "actions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["device_id", "command"],
+                                    "properties": {
+                                        "device_id": {"type": "string", "format": "uuid"},
+                                        "command": {
+                                            "type": "string",
+                                            "enum": ["on", "off", "set_level", "custom"],
+                                            "example": "off"
+                                        },
+                                        "value": {
+                                            "type": "number",
+                                            "description": "set_level gibi komutlar için değer",
+                                            "example": 50
+                                        }
+                                    }
+                                },
+                                "example": [
+                                    {"device_id": "550e8400-e29b-41d4-a716-446655440000", "command": "off"}
+                                ]
+                            },
+                            "schedule": {
+                                "type": "object",
+                                "description": "Opsiyonel zamanlama",
+                                "properties": {
+                                    "days": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "enum": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                                        },
+                                        "example": ["Mon", "Tue", "Wed"]
+                                    },
+                                    "time": {
+                                        "type": "string",
+                                        "pattern": "^\\d{2}:\\d{2}$",
+                                        "example": "18:00"
+                                    },
+                                    "timezone": {
+                                        "type": "string",
+                                        "example": "Europe/Istanbul"
+                                    }
+                                }
+                            }
+                        },
                         "example": {
-                            "trigger": {"type": "price", "operator": "<", "value": 2.0},
-                            "action": {"type": "turn_on"},
-                            "conditions": [{"type": "time_range", "start": "22:00", "end": "06:00"}]
+                            "trigger": {"type": "price", "operator": "<", "value": 2.5},
+                            "actions": [
+                                {"device_id": "550e8400-e29b-41d4-a716-446655440000", "command": "off"}
+                            ],
+                            "schedule": {
+                                "days": ["Mon", "Tue"],
+                                "time": "18:00",
+                                "timezone": "Europe/Istanbul"
+                            }
                         }
                     }
                 },

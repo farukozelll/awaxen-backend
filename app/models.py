@@ -118,6 +118,38 @@ class Permission(db.Model):
         }
 
 
+class UserInvite(db.Model):
+    """Organization user invitations."""
+    __tablename__ = "user_invites"
+
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(UUID(as_uuid=True), db.ForeignKey("organizations.id"), nullable=False)
+    invited_by = db.Column(UUID(as_uuid=True), db.ForeignKey("users.id"))
+
+    email = db.Column(db.String(255), nullable=False)
+    role_code = db.Column(db.String(50), nullable=False, default="viewer")
+
+    token = db.Column(db.String(128), unique=True, nullable=False)
+    status = db.Column(db.String(20), default="pending")  # pending, accepted, expired, revoked
+    expires_at = db.Column(db.DateTime, nullable=False)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": str(self.id),
+            "organization_id": str(self.organization_id),
+            "invited_by": str(self.invited_by) if self.invited_by else None,
+            "email": self.email,
+            "role_code": self.role_code,
+            "status": self.status,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "token": self.token,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Role(db.Model):
     """
     Rol Tanımı - Yetki grupları.
@@ -820,6 +852,7 @@ class Automation(db.Model):
     description = db.Column(db.Text)
     
     is_active = db.Column(db.Boolean, default=True)
+    priority = db.Column(db.Integer, default=100)
     rules = db.Column(JSONB, nullable=False)
     
     last_triggered_at = db.Column(db.DateTime)
@@ -840,6 +873,7 @@ class Automation(db.Model):
             "name": self.name,
             "description": self.description,
             "is_active": self.is_active,
+            "priority": self.priority,
             "rules": self.rules,
             "last_triggered_at": self.last_triggered_at.isoformat() if self.last_triggered_at else None,
             "trigger_count": self.trigger_count,

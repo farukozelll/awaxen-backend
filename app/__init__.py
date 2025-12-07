@@ -66,6 +66,9 @@ def create_app():
         MQTT_SENSOR_TOPIC=os.getenv("MQTT_SENSOR_TOPIC", "awaxen/sensors/#"),
         MQTT_CLIENT_ID=os.getenv("MQTT_CLIENT_ID", "awaxen-backend"),
         MQTT_AUTO_START=_env_flag(os.getenv("MQTT_AUTO_START", "true")),
+        
+        # Telegram Bot
+        TELEGRAM_BOT_TOKEN=os.getenv("TELEGRAM_BOT_TOKEN"),
     )
 
     app.config["APP_VERSION"] = APP_VERSION
@@ -103,7 +106,9 @@ def create_app():
 
     # Rotaları kaydet (Modüler Blueprint yapısı)
     from .api import api_bp
+    from .api.routes_webhooks import bp as webhook_bp
     app.register_blueprint(api_bp)
+    app.register_blueprint(webhook_bp, url_prefix="/webhooks")
     
     # Ana sayfa için basit route (api prefix'siz)
     @app.route('/')

@@ -4,11 +4,14 @@ Organization Routes - SaaS Tenant Yönetimi.
 Eski 'Sites' yapısının yerine geçti.
 Her Organization bir ev, tarım işletmesi veya fabrika olabilir.
 """
+import secrets
+from datetime import datetime, timedelta
+
 from flask import Blueprint, request, jsonify
 from flasgger import swag_from
 
 from app.extensions import db
-from app.models import Organization, User
+from app.models import Organization, User, Role, UserInvite
 from app.api.helpers import (
     get_current_user,
     get_pagination_params,
@@ -491,3 +494,91 @@ def get_organization_stats(org_id):
     }
     
     return jsonify(stats)
+
+
+@organizations_bp.route("/organizations/<uuid:org_id>/invite", methods=["POST"])
+@requires_auth
+@swag_from({
+    "tags": ["Organizations"],
+    "summary": "Yeni kullanıcı daveti oluştur",
+    "security": [{"bearerAuth": []}],
+    "consumes": ["application/json"],
+    "parameters": [
+        {"name": "org_id", "in": "path", "type": "string", "required": True},
+        {
+            "name": "body",
+            "in": "body",
+            "required": True,
+            "schema": {
+                "type": "object",
+                "required": ["email"],
+                "properties": {
+                    "email": {"type": "string", "format": "email", "example": "new.user@awaxen.com"},
+                    "role_code": {
+                        "type": "string",
+                        "enum": ["super_admin", "admin", "operator", "viewer", "farmer"],
+                        "default": "viewer",
+                    },
+                    "expires_in_days": {"type": "integer", "example": 7, "default": 7},
+                },
+            },
+        },
+    ],
+    "responses": {
+        201: {"description": "Davet oluşturuldu"},
+        400: {"description": "Geçersiz veri"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+    },
+})
+def invite_user(org_id):
+    """Organizasyona yeni kullanıcı daveti oluştur."""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    org = Organization.query.get_or_404(org_id)
+
+    user_role_code = user.role.code if user.role else None
+    if user_role_code not in ["super_admin"] and (
+        user_role_code not in ["admin", "operator"] or user.organization_id != org.id
+    ):
+        return jsonify({"error": "Forbidden"}), 403
+
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    role_code = data.get("role_code", "viewer")
+    expires_in_days = int(data.get("expires_in_days", 7))
+
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+
+    role = Role.get_by_code(role_code)
+    if not role:
+        return jsonify({"error": "Invalid role_code"}), 400
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(days=max(1, expires_in_days))
+
+    invite = UserInvite.query.filter_by(email=email, organization_id=org.id, status="pending").first()
+    if invite:
+        invite.role_code = role_code
+        invite.token = token
+        invite.expires_at = expires_at
+        invite.invited_by = user.id
+    else:
+        invite = UserInvite(
+            organization_id=org.id,
+            invited_by=user.id,
+            email=email,
+            role_code=role_code,
+            token=token,
+            expires_at=expires_at,
+        )
+        db.session.add(invite)
+
+    db.session.commit()
+
+    # TODO: Email gönderimi burada tetiklenebilir
+
+    return jsonify({"message": "Invite created", "invite": invite.to_dict()}), 201
