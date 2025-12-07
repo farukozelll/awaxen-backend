@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import g, request
 
 from app.extensions import db
-from app.models import User, Organization
+from app.models import User, Organization, Role
 from app.auth import get_current_user_id
 
 # Yapı: { org_id: { "data": {...}, "timestamp": 1701234567 } }
@@ -32,12 +32,15 @@ def get_current_user() -> Optional[User]:
         db.session.add(org)
         db.session.flush()
         
+        role_code = token_info.get("role") or "admin"
+        role = Role.get_by_code(role_code) or Role.get_by_code("admin")
+
         user = User(
             organization_id=org.id,
             auth0_id=auth0_id,
             email=token_info.get("email", f"{auth0_id}@unknown.com"),
             full_name=token_info.get("name", "Yeni Kullanıcı"),
-            role="admin",
+            role_id=role.id if role else None,
         )
         db.session.add(user)
         db.session.commit()

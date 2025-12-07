@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import List, Optional, Union
 
 from flask import Flask
 from flask_cors import CORS
@@ -16,12 +16,34 @@ def _env_flag(value: Optional[str], default: bool = True) -> bool:
     return value.lower() not in {"0", "false", "no", "off"}
 
 
+def _parse_cors_origins(value: Optional[str]) -> Union[str, List[str]]:
+    """
+    Kullanıcıdan gelen CORS_ORIGINS env değerini listeye dönüştür.
+
+    Örnekler:
+        "*" -> "*"
+        "http://localhost:3005" -> ["http://localhost:3005"]
+        "http://localhost:3005,https://app.awaxen.com" -> [...]
+    """
+    if not value:
+        return "*"
+
+    value = value.strip()
+    if value == "*":
+        return "*"
+
+    origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+    return origins or "*"
+
+
 def create_app():
     app = Flask(__name__)
+
+    cors_origins = _parse_cors_origins(os.getenv("CORS_ORIGINS", "http://localhost:3005"))
     CORS(
         app,
-        resources={r"/*": {"origins": "*"}},
-        supports_credentials=True,
+        resources={r"/api/*": {"origins": cors_origins}},
+        supports_credentials=cors_origins != "*",
         allow_headers=[
             "Content-Type",
             "Authorization",
@@ -69,6 +91,9 @@ def create_app():
         
         # Telegram Bot
         TELEGRAM_BOT_TOKEN=os.getenv("TELEGRAM_BOT_TOKEN"),
+        
+        # CORS
+        CORS_ALLOWED_ORIGINS=cors_origins,
     )
 
     app.config["APP_VERSION"] = APP_VERSION

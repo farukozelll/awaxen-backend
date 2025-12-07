@@ -262,6 +262,12 @@ def _get_quick_actions():
             "type": "integer",
             "default": 20,
             "description": "Döndürülecek aktivite sayısı (max 100)"
+        },
+        {
+            "name": "organization_id",
+            "in": "query",
+            "type": "string",
+            "description": "Sadece super_admin için: Belirli bir organizasyonun aktivitelerini getir"
         }
     ],
     "responses": {
@@ -277,31 +283,41 @@ def _get_quick_actions():
                         "title": {"type": "string"},
                         "status": {"type": "string", "example": "success"},
                         "detail": {"type": "string"},
-                        "timestamp": {"type": "string", "format": "date-time"}
+                        "timestamp": {"type": "string", "format": "date-time"},
+                        "organization_id": {"type": "string"}
                     }
                 }
             }
         },
-        401: {"description": "Yetkisiz erişim"}
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"}
     }
 })
 def get_activity_log():
     """Dashboard Activity Log endpoint'i."""
     user = get_current_user()
-    if not user or not user.organization_id:
-        return jsonify({"error": "Organizasyon bulunamadı"}), 400
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
 
     limit = request.args.get("limit", 20, type=int)
     limit = max(1, min(limit, 100))
+    org_id_param = request.args.get("organization_id")
+
+    # Yetki kontrolü: normal kullanıcılar sadece kendi organizasyonlarını görebilir
+    user_role = user.role.code if user.role else None
+    if user_role == "super_admin":
+        target_org_id = org_id_param or (str(user.organization_id) if user.organization_id else None)
+    else:
+        target_org_id = str(user.organization_id) if user.organization_id else None
+
+    if not target_org_id:
+        return jsonify({"error": "Organizasyon bulunamadı"}), 400
 
     # Şimdilik otomasyon loglarını temel alıyoruz; ileride farklı kaynaklardan da birleşebilir
-    logs = (
-        AutomationLog.query
-        .filter_by(organization_id=user.organization_id)
-        .order_by(AutomationLog.triggered_at.desc())
-        .limit(limit)
-        .all()
-    )
+    query = AutomationLog.query.order_by(AutomationLog.triggered_at.desc())
+    if target_org_id:
+        query = query.filter_by(organization_id=target_org_id)
+    logs = query.limit(limit).all()
 
     activities = []
     for log in logs:
@@ -313,6 +329,7 @@ def get_activity_log():
             "detail": log.reason,
             "timestamp": log.triggered_at.isoformat() if log.triggered_at else None,
             "automation_id": str(log.automation_id),
+            "organization_id": str(log.organization_id) if log.organization_id else None,
         })
 
     return jsonify(activities)
