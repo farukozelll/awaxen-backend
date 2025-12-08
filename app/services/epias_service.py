@@ -17,7 +17,7 @@ TGT yaklaşık 2 saat geçerlidir.
 import os
 import logging
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import Optional, List, Dict, Any
 
 # Redis cache için (opsiyonel)
@@ -159,13 +159,13 @@ class EpiasService:
         # Önce TGT ile dene
         tgt = self.get_tgt()
         if tgt:
-            result = self._fetch_mcp_with_tgt(date_str, tgt)
+            result = self._fetch_mcp_with_tgt(date_obj, tgt)
             if result is not None:
                 return result
             # TGT geçersiz olabilir, yenile ve tekrar dene
             tgt = self.get_tgt(force_refresh=True)
             if tgt:
-                result = self._fetch_mcp_with_tgt(date_str, tgt)
+                result = self._fetch_mcp_with_tgt(date_obj, tgt)
                 if result is not None:
                     return result
         
@@ -181,14 +181,12 @@ class EpiasService:
         logger.error(f"EPİAŞ MCP verisi alınamadı: {date_str}")
         return None
     
-    def _fetch_mcp_with_tgt(self, date_str: str, tgt: str) -> Optional[List[Dict[str, Any]]]:
+    def _fetch_mcp_with_tgt(self, date_obj: datetime, tgt: str) -> Optional[List[Dict[str, Any]]]:
         """TGT ile MCP verisi çek."""
         url = f"{self.BASE_URL}/markets/dam/data/mcp"
         headers = {**self.HEADERS, "TGT": tgt}
-        payload = {
-            "startDate": f"{date_str}T00:00:00+03:00",
-            "endDate": f"{date_str}T23:59:59+03:00"
-        }
+        payload = self._build_market_payload(date_obj)
+        date_str = date_obj.strftime("%Y-%m-%d")
         
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=20)
@@ -202,8 +200,12 @@ class EpiasService:
             
             return []
             
+        except requests.exceptions.HTTPError as e:
+            body = e.response.text[:500] if e.response is not None else ""
+            logger.warning(f"EPİAŞ MCP (TGT) Hatası: {e} | Payload: {payload} | Response: {body}")
+            return None
         except requests.exceptions.RequestException as e:
-            logger.warning(f"EPİAŞ MCP (TGT) Hatası: {str(e)}")
+            logger.warning(f"EPİAŞ MCP (TGT) Bağlantı Hatası: {str(e)}")
             return None
         except ValueError as e:
             logger.warning(f"EPİAŞ MCP JSON parse hatası: {str(e)}")
@@ -233,8 +235,12 @@ class EpiasService:
             
             return []
             
+        except requests.exceptions.HTTPError as e:
+            body = e.response.text[:500] if e.response is not None else ""
+            logger.warning(f"EPİAŞ Public MCP Hatası: {e} | Payload: {payload} | Response: {body}")
+            return None
         except requests.exceptions.RequestException as e:
-            logger.warning(f"EPİAŞ Public MCP Hatası: {str(e)}")
+            logger.warning(f"EPİAŞ Public MCP Bağlantı Hatası: {str(e)}")
             return None
         except ValueError as e:
             logger.warning(f"EPİAŞ Public MCP JSON parse hatası: {str(e)}")
@@ -270,6 +276,31 @@ class EpiasService:
                 continue
         
         return normalized
+
+    def _build_market_payload(self, date_obj: datetime) -> Dict[str, str]:
+        """
+        EPİAŞ tarih aralığı payload'unu oluşturur.
+        Gün içindeysek endDate'i mevcut saate kadar kısıtlar, aksi halde gün sonuna kadar talep eder.
+        """
+        target_date = date_obj.date()
+        tz_suffix = "+03:00"
+
+        start_dt = datetime.combine(target_date, time(hour=0, minute=0, second=0))
+        end_dt = datetime.combine(target_date, time(hour=23, minute=59, second=59))
+
+        # TR saat diliminde şu an
+        now_tr = datetime.utcnow() + timedelta(hours=3)
+        if target_date == now_tr.date():
+            end_dt = min(end_dt, now_tr.replace(microsecond=0))
+
+        # end_dt hiçbir durumda start_dt'den küçük olmamalı
+        if end_dt < start_dt:
+            end_dt = start_dt
+
+        return {
+            "startDate": start_dt.strftime("%Y-%m-%dT%H:%M:%S") + tz_suffix,
+            "endDate": end_dt.strftime("%Y-%m-%dT%H:%M:%S") + tz_suffix
+        }
     
     def get_realtime_consumption(self, start_date: datetime, end_date: datetime) -> Optional[List[Dict]]:
         """

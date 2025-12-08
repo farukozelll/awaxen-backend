@@ -9,14 +9,18 @@ Desteklenen Komutlar:
 - /help: Yardım menüsü
 """
 import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Blueprint, current_app, jsonify, request
 
 from app.extensions import db
 from app.models import User, SmartDevice, Wallet
+from app.services import get_current_market_price
 
 bp = Blueprint("webhooks", __name__)
 
 TELEGRAM_API_URL = "https://api.telegram.org/bot"
+TR_TIMEZONE = ZoneInfo("Europe/Istanbul")
 
 
 @bp.route("/telegram", methods=["POST"])
@@ -55,6 +59,9 @@ def telegram_webhook():
     
     elif text.startswith("/status"):
         return handle_status(chat_id, user, token)
+    
+    elif text.startswith("/market"):
+        return handle_market(chat_id, user, token)
     
     elif text.startswith("/balance"):
         return handle_balance(chat_id, user, token)
@@ -108,10 +115,13 @@ def handle_start(chat_id, username, user, token):
         "inline_keyboard": [
             [
                 {"text": "📊 Durum", "callback_data": "cmd_status"},
-                {"text": "💰 Bakiye", "callback_data": "cmd_balance"},
+                {"text": "⚡ Piyasa", "callback_data": "cmd_market"},
             ],
             [
+                {"text": "💰 Bakiye", "callback_data": "cmd_balance"},
                 {"text": "🔌 Cihazlar", "callback_data": "cmd_devices"},
+            ],
+            [
                 {"text": "❓ Yardım", "callback_data": "cmd_help"},
             ],
         ]
@@ -144,6 +154,10 @@ def handle_status(chat_id, user, token):
     wallet = Wallet.query.filter_by(user_id=user.id).first()
     balance = wallet.balance if wallet else 0
     
+    # Piyasa fiyatı (fallback garantili)
+    market_info = get_current_market_price()
+    market_text = format_market_summary(market_info)
+
     msg = (
         f"📊 *Sistem Durumu*\n\n"
         f"👤 Kullanıcı: {user.full_name or user.email}\n"
@@ -151,11 +165,68 @@ def handle_status(chat_id, user, token):
         f"🔌 Toplam Cihaz: {total_devices}\n"
         f"✅ Çevrimiçi: {online_devices}\n"
         f"❌ Çevrimdışı: {total_devices - online_devices}\n\n"
-        f"💰 Bakiye: {balance:.2f} AWX"
+        f"💰 Bakiye: {balance:.2f} AWX\n\n"
+        f"{market_text}"
     )
     
     send_telegram_message(chat_id, msg, token, parse_mode="Markdown")
     return jsonify({"status": "ok"}), 200
+
+
+def handle_market(chat_id, user, token):
+    """Anlık piyasa özetini gönder."""
+    if not user:
+        send_telegram_message(chat_id, "❌ Önce /start ile hesabını eşleştir.", token)
+        return jsonify({"status": "not_linked"}), 200
+
+    market_info = get_current_market_price()
+    market_text = format_market_summary(market_info, header="⚡ *Anlık Piyasa Özeti*")
+
+    send_telegram_message(chat_id, market_text, token, parse_mode="Markdown")
+    return jsonify({"status": "ok"}), 200
+
+
+def format_market_summary(market_info, header="⚡ *Anlık Piyasa*"):
+    """Market servisinden gelen veriyi kullanıcı dostu metne çevir."""
+    price_kwh = market_info.get("price")
+    ptf_price = market_info.get("ptf")
+    price_time = market_info.get("time")
+    currency = market_info.get("currency", "TL/kWh")
+    price_source = market_info.get("source", "unknown")
+    is_default = market_info.get("is_default")
+
+    lines = [header]
+    lines.append(
+        f"Fiyat: {price_kwh:.3f} {currency}" if price_kwh is not None else "Fiyat: Bilinmiyor"
+    )
+    if ptf_price:
+        lines.append(f"PTF: {ptf_price:.0f} TL/MWh")
+    local_time = _format_tr_time(price_time, include_date=True)
+    if local_time:
+        lines.append(f"Zaman: {local_time}")
+    if is_default:
+        lines.append("Kaynak: 🔁 Varsayılan (veri yok)")
+    else:
+        lines.append("Kaynak: EPİAŞ Şeffaflık Platformu")
+        if price_source and price_source not in {"database", "cache"}:
+            lines.append(f"İç Kaynak: {price_source}")
+
+    return "\n".join(lines)
+
+
+def _format_tr_time(price_time, include_date=False):
+    """ISO time string'i Avrupa/İstanbul saatine çevir."""
+    if not price_time:
+        return None
+    try:
+        dt = datetime.fromisoformat(price_time.replace("Z", "+00:00"))
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        tr_dt = dt.astimezone(TR_TIMEZONE)
+        fmt = "%d.%m.%Y %H:%M" if include_date else "%H:%M"
+        return tr_dt.strftime(f"{fmt} (TR)")
+    except ValueError:
+        return price_time
 
 
 def handle_balance(chat_id, user, token):
@@ -245,6 +316,8 @@ def handle_callback_query(callback_query, token):
         return handle_devices(chat_id, user, token)
     elif data == "cmd_help":
         return handle_help(chat_id, token)
+    elif data == "cmd_market":
+        return handle_market(chat_id, user, token)
     
     return jsonify({"status": "ok"}), 200
 
