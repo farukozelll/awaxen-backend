@@ -1,11 +1,19 @@
 """SmartAsset (Varlık) yönetimi endpoint'leri - v6.0."""
-from flask import jsonify, request
+import logging
+from typing import Tuple
+
+from flask import jsonify, request, Response
+from sqlalchemy.orm import joinedload
 
 from . import api_bp
 from .helpers import get_current_user, get_pagination_params, get_filter_params, paginate_response, apply_sorting
 from app.models import SmartAsset, SmartDevice
 from app.extensions import db
 from app.auth import requires_auth
+from app.exceptions import error_response, success_response, not_found_response
+from app.constants import HttpStatus
+
+logger = logging.getLogger(__name__)
 
 
 @api_bp.route('/assets', methods=['GET'])
@@ -102,7 +110,10 @@ def get_all_assets():
     page, page_size = get_pagination_params()
     asset_type = request.args.get('type')
 
-    query = SmartAsset.query.filter_by(
+    # Eager loading ile N+1 query önleme
+    query = SmartAsset.query.options(
+        joinedload(SmartAsset.device)
+    ).filter_by(
         organization_id=user.organization_id,
         is_active=True
     )

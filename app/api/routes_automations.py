@@ -3,8 +3,12 @@ Automation Routes - Otomasyon Kuralları.
 
 Fiyat bazlı, zaman bazlı ve sensör bazlı otomasyonlar.
 """
-from flask import Blueprint, request, jsonify
+import logging
+from typing import Dict, Any, Tuple
+
+from flask import Blueprint, request, jsonify, Response
 from flasgger import swag_from
+from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.models import Automation, AutomationLog, SmartAsset
@@ -15,6 +19,13 @@ from app.api.helpers import (
 )
 from app.services.automation_engine import automation_engine
 from app.auth import requires_auth
+from app.exceptions import (
+    error_response, success_response, not_found_response,
+    ValidationError, ResourceNotFoundError
+)
+from app.constants import HttpStatus
+
+logger = logging.getLogger(__name__)
 
 automations_bp = Blueprint("automations", __name__)
 
@@ -79,8 +90,11 @@ def list_automations():
     search = request.args.get("search", "", type=str).strip()
     is_active = request.args.get("is_active")
     
-    # Temel filtre: Organizasyon bazlı izolasyon
-    query = Automation.query.filter_by(organization_id=user.organization_id)
+    # Eager loading ile N+1 query önleme
+    query = Automation.query.options(
+        joinedload(Automation.asset),
+        joinedload(Automation.creator)
+    ).filter_by(organization_id=user.organization_id)
     
     # Row-Level Security: Admin/super_admin değilse sadece kendi oluşturduklarını görsün
     user_role_code = user.role.code if user.role else None

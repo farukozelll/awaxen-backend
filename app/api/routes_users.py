@@ -1,14 +1,22 @@
 """
 User management routes (super admin only).
 """
-from flask import jsonify, request
+import logging
+from typing import Tuple
+
+from flask import jsonify, request, Response
 from flasgger import swag_from
 from sqlalchemy import or_
+from sqlalchemy.orm import joinedload
 
 from . import api_bp
 from .helpers import get_current_user, get_pagination_params, paginate_response
 from app.auth import requires_auth
 from app.models import Organization, Role, User
+from app.exceptions import error_response, forbidden_response, unauthorized_response
+from app.constants import HttpStatus
+
+logger = logging.getLogger(__name__)
 
 
 @api_bp.route("/users", methods=["GET"])

@@ -36,10 +36,16 @@ def requires_auth(f):
     Token doğrulama decorator'ı.
     Bu decorator'ı kullanan endpoint'ler sadece geçerli token ile erişilebilir.
     Token'dan çıkan kullanıcı bilgisi g.current_user'a yazılır.
+    
+    Not: OPTIONS istekleri (CORS preflight) auth gerektirmez.
     """
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        # CORS preflight isteklerini bypass et
+        if request.method == "OPTIONS":
+            return "", 200
+        
         token = get_token_from_header()
 
         if not token:

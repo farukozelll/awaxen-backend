@@ -1,16 +1,48 @@
+"""
+Awaxen Backend - Flask Application Factory.
+
+Best practices:
+- Environment validation
+- Structured logging
+- Celery integration
+- Modular architecture
+"""
 import os
+import logging
 from typing import List, Optional, Union
 
 from flask import Flask
 from flask_cors import CORS
 from flasgger import Swagger
 
-# Extensions'dan import et (circular import önleme)
 from .extensions import db, migrate, socketio, celery, init_celery
 from .version import APP_VERSION
+from .constants import DEFAULT_TIMEZONE
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+
+def _get_required_env(key: str) -> str:
+    """Zorunlu environment variable'ı al, yoksa hata fırlat."""
+    value = os.getenv(key)
+    if not value:
+        raise ValueError(f"Missing required environment variable: {key}")
+    return value
+
+
+def _get_env(key: str, default: str = None) -> Optional[str]:
+    """Opsiyonel environment variable'ı al."""
+    return os.getenv(key, default)
 
 
 def _env_flag(value: Optional[str], default: bool = True) -> bool:
+    """Environment variable'ı boolean'a çevir."""
     if value is None:
         return default
     return value.lower() not in {"0", "false", "no", "off"}
@@ -18,7 +50,7 @@ def _env_flag(value: Optional[str], default: bool = True) -> bool:
 
 def _parse_cors_origins(value: Optional[str]) -> Union[str, List[str]]:
     """
-    Kullanıcıdan gelen CORS_ORIGINS env değerini listeye dönüştür.
+    CORS_ORIGINS env değerini listeye dönüştür.
 
     Örnekler:
         "*" -> "*"
@@ -36,14 +68,41 @@ def _parse_cors_origins(value: Optional[str]) -> Union[str, List[str]]:
     return origins or "*"
 
 
-def create_app():
-    app = Flask(__name__)
+def _validate_environment() -> None:
+    """Kritik environment variable'ları kontrol et."""
+    required_vars = ["DATABASE_URL"]
+    missing = [var for var in required_vars if not os.getenv(var)]
+    
+    if missing:
+        logger.warning(f"Missing environment variables: {', '.join(missing)}")
+        # Development'ta hata fırlatma, sadece uyar
+        if os.getenv("FLASK_ENV") == "production":
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-    cors_origins = _parse_cors_origins(os.getenv("CORS_ORIGINS", "http://localhost:3005"))
+
+def create_app() -> Flask:
+    """
+    Flask application factory.
+    
+    Returns:
+        Configured Flask application
+    """
+    # Environment validation
+    _validate_environment()
+    
+    app = Flask(__name__)
+    
+    # CORS configuration - tüm API endpoint'leri için
+    cors_origins = _parse_cors_origins(os.getenv("CORS_ORIGINS", "*"))
     CORS(
         app,
-        resources={r"/api/*": {"origins": cors_origins}},
-        supports_credentials=cors_origins != "*",
+        resources={
+            r"/api/*": {"origins": cors_origins},
+            r"/webhooks/*": {"origins": cors_origins},
+            r"/health": {"origins": "*"},
+            r"/": {"origins": "*"},
+        },
+        supports_credentials=True,
         allow_headers=[
             "Content-Type",
             "Authorization",
@@ -51,13 +110,24 @@ def create_app():
             "X-Auth0-Email",
             "X-Auth0-Name",
             "X-Auth0-Role",
+            "X-Requested-With",
+            "Accept",
+            "Origin",
         ],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        expose_headers=["Content-Type", "Authorization"],
+        max_age=86400,  # Preflight cache 24 saat
     )
 
+    # Application configuration
     app.config.update(
         # Database
         SQLALCHEMY_DATABASE_URI=os.getenv("DATABASE_URL"),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        SQLALCHEMY_ENGINE_OPTIONS={
+            "pool_pre_ping": True,
+            "pool_recycle": 300,
+        },
         
         # Celery
         CELERY_BROKER_URL=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
@@ -94,64 +164,78 @@ def create_app():
         
         # CORS
         CORS_ALLOWED_ORIGINS=cors_origins,
+        
+        # App
+        APP_VERSION=APP_VERSION,
     )
 
-    app.config["APP_VERSION"] = APP_VERSION
-
+    # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
     socketio.init_app(app, cors_allowed_origins="*")
     Swagger(app)
+    
+    # Initialize Celery with app context
+    init_celery(app, celery)
+    logger.info("Celery initialized with Flask app context")
 
-    # Modelleri içeri aktar ve tabloları oluştur
+    # Import models (from new modular structure)
     from .models import (  # noqa: F401
-        # v6.0 RBAC
         Role, Permission,
-        # v6.0 SaaS Core
         Organization, User, Gateway, Integration,
-        # v6.0 Devices & Assets
         SmartDevice, SmartAsset, DeviceTelemetry,
-        # v6.0 Automation & Economy
         MarketPrice, Automation, AutomationLog, Notification,
-        # VPP
-        VppRule,
+        VppRule, Wallet, WalletTransaction, AuditLog,
     )
 
+    # Create tables and seed data
     with app.app_context():
         db.create_all()
-        print("v6.0 Tablolar kontrol edildi ve oluşturuldu.")
+        logger.info("Database tables checked/created")
         
-        # Varsayılan rolleri ve yetkileri oluştur (yoksa)
+        # Seed default roles and permissions
         try:
             if Role.query.count() == 0:
                 Role.seed_default_roles()
-                print("Varsayılan roller ve yetkiler oluşturuldu.")
+                logger.info("Default roles and permissions seeded")
         except Exception as e:
-            print(f"Rol seed hatası (ilk çalıştırmada normal): {e}")
+            logger.warning(f"Role seed error (normal on first run): {e}")
 
-    # Rotaları kaydet (Modüler Blueprint yapısı)
+    # Register blueprints
     from .api import api_bp
     from .api.routes_webhooks import bp as webhook_bp
     app.register_blueprint(api_bp)
     app.register_blueprint(webhook_bp, url_prefix="/webhooks")
+    logger.info("API blueprints registered")
     
-    # Ana sayfa için basit route (api prefix'siz)
+    # Health check endpoint
     @app.route('/')
     def home():
-        return "Awaxen Industrial Backend Hazır!"
+        return {
+            "status": "healthy",
+            "service": "Awaxen Backend",
+            "version": APP_VERSION
+        }
+    
+    @app.route('/health')
+    def health_check():
+        """Health check endpoint for Docker/K8s."""
+        return {
+            "status": "healthy",
+            "version": APP_VERSION,
+            "database": "connected" if db.engine else "disconnected"
+        }
 
-    # Socket event handler'larını kaydet
+    # Register Socket.IO event handlers
     from . import realtime  # noqa: F401
 
-    # MQTT client'ı başlat
-    # Werkzeug reloader aktifse sadece child process'te (WERKZEUG_RUN_MAIN=true) başlat
-    # Reloader kapalıysa veya production'da direkt başlat
+    # Initialize MQTT client
     if app.config.get("MQTT_AUTO_START", True):
-        import os as _os
-        werkzeug_main = _os.environ.get("WERKZEUG_RUN_MAIN")
-        # Reloader yoksa (werkzeug_main is None) veya reloader child process'teysek başlat
+        werkzeug_main = os.environ.get("WERKZEUG_RUN_MAIN")
         if werkzeug_main is None or werkzeug_main == "true":
             from .mqtt_client import init_mqtt_client
             init_mqtt_client(app)
+            logger.info("MQTT client initialized")
 
+    logger.info(f"Awaxen Backend v{APP_VERSION} started successfully")
     return app

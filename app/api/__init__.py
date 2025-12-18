@@ -37,3 +37,7 @@ from . import routes_wallet
 from . import routes_notifications
 from . import routes_users
 from . import routes_roles  # RBAC - Rol ve Yetki Yönetimi
+from .routes_weather import weather_bp
+
+# Weather Blueprint
+api_bp.register_blueprint(weather_bp, url_prefix="/weather")

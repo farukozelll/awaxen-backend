@@ -1,8 +1,10 @@
 """SmartDevice (Akıllı Cihaz) yönetimi endpoint'leri - v6.0."""
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import List
 
 from flask import jsonify, request
+from sqlalchemy.orm import joinedload
 
 from . import api_bp
 from .helpers import get_current_user, get_pagination_params, get_filter_params, paginate_response, apply_sorting
@@ -10,6 +12,13 @@ from app.models import SmartDevice, SmartAsset
 from app.extensions import db
 from app.auth import requires_auth
 from app.services.shelly_service import get_shelly_service
+from app.exceptions import (
+    error_response, success_response, not_found_response, 
+    unauthorized_response, ValidationError, DatabaseError
+)
+from app.constants import HttpStatus
+
+logger = logging.getLogger(__name__)
 
 
 @api_bp.route('/devices', methods=['GET'])
@@ -122,7 +131,12 @@ def get_devices():
     integration_id = request.args.get('integration_id')
     is_online = request.args.get('is_online')
 
-    query = SmartDevice.query.filter_by(
+    # Eager loading ile N+1 query problemini önle
+    query = SmartDevice.query.options(
+        joinedload(SmartDevice.gateway),
+        joinedload(SmartDevice.integration),
+        joinedload(SmartDevice.asset)
+    ).filter_by(
         organization_id=user.organization_id,
         is_active=True
     )

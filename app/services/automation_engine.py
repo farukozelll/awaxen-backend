@@ -4,8 +4,9 @@ Automation Engine - Otomasyon kurallarını değerlendir ve çalıştır.
 Bu modül otomasyon mantığının merkezidir.
 Celery task'ları bu servisi kullanır.
 """
-from datetime import datetime
-from typing import Optional, Tuple
+import logging
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, Tuple
 
 from app.extensions import db
 from app.models import (
@@ -13,6 +14,8 @@ from app.models import (
     SmartAsset, SmartDevice, DeviceTelemetry
 )
 from app.services.shelly_service import get_shelly_service
+
+logger = logging.getLogger(__name__)
 
 
 class AutomationEngine:
@@ -96,7 +99,7 @@ class AutomationEngine:
             return False
             
         except Exception as e:
-            print(f"Automation execution error: {e}")
+            logger.exception(f"Automation execution error: {e}")
             return False
     
     def run_automation(self, automation: Automation) -> dict:
@@ -134,7 +137,7 @@ class AutomationEngine:
             db.session.add(log)
             
             # İstatistik güncelle
-            automation.last_triggered_at = datetime.utcnow()
+            automation.last_triggered_at = datetime.now(timezone.utc)
             automation.trigger_count = (automation.trigger_count or 0) + 1
             db.session.commit()
             
@@ -198,7 +201,7 @@ class AutomationEngine:
         end_time = trigger.get('end', '23:59')
         days = trigger.get('days', [0, 1, 2, 3, 4, 5, 6])
         
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         current_time = now.strftime('%H:%M')
         current_day = now.weekday()
         
@@ -303,7 +306,7 @@ class AutomationEngine:
                     return service.toggle(device)
         
         # Diğer markalar için placeholder (gelecekte Tapo, Tuya vb. eklenecek)
-        print(f"[ENGINE] Device brand '{device.brand}' not yet supported, would {action} {device.name}")
+        logger.info(f"[ENGINE] Device brand '{device.brand}' not yet supported, would {action} {device.name}")
         return True
     
     def _set_power(self, device: SmartDevice, power_level: int) -> bool:
@@ -314,10 +317,10 @@ class AutomationEngine:
                 try:
                     return service.set_power_limit(device, power_level)
                 except Exception as e:
-                    print(f"[ENGINE] Shelly power control error: {e}")
+                    logger.error(f"[ENGINE] Shelly power control error: {e}")
                     return False
         
-        print(f"[ENGINE] Power control not supported for {device.brand}/{device.device_type}")
+        logger.warning(f"[ENGINE] Power control not supported for {device.brand}/{device.device_type}")
         return False
 
 

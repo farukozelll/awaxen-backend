@@ -582,3 +582,147 @@ def invite_user(org_id):
     # TODO: Email gönderimi burada tetiklenebilir
 
     return jsonify({"message": "Invite created", "invite": invite.to_dict()}), 201
+
+
+# ==========================================
+# Location Yönetimi
+# ==========================================
+
+@organizations_bp.route("/organizations/<uuid:org_id>/location", methods=["GET", "OPTIONS"])
+@requires_auth
+@swag_from({
+    "tags": ["Organizations"],
+    "summary": "Organizasyon lokasyonunu getir",
+    "description": "Hava durumu ve enerji hesaplamaları için kullanılan lokasyon bilgisi.",
+    "parameters": [
+        {"name": "org_id", "in": "path", "type": "string", "required": True}
+    ],
+    "responses": {
+        200: {
+            "description": "Lokasyon bilgisi",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number", "example": 41.0082},
+                    "longitude": {"type": "number", "example": 28.9784},
+                    "city": {"type": "string", "example": "Istanbul"},
+                    "country": {"type": "string", "example": "TR"},
+                    "timezone": {"type": "string", "example": "Europe/Istanbul"}
+                }
+            }
+        },
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Organizasyon bulunamadı"}
+    }
+})
+def get_organization_location(org_id):
+    """Organizasyon lokasyonunu getir."""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    org = Organization.query.get_or_404(org_id)
+    
+    # Yetki kontrolü - kendi organizasyonu veya super_admin
+    user_role_code = user.role.code if user.role else None
+    if user_role_code != "super_admin" and user.organization_id != org.id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    location = org.location or {}
+    return jsonify({
+        "latitude": location.get("latitude") or location.get("lat"),
+        "longitude": location.get("longitude") or location.get("lon"),
+        "city": location.get("city"),
+        "country": location.get("country"),
+        "timezone": org.timezone,
+        "is_configured": bool(location.get("latitude") or location.get("lat"))
+    })
+
+
+@organizations_bp.route("/organizations/<uuid:org_id>/location", methods=["PUT", "PATCH", "OPTIONS"])
+@requires_auth
+@swag_from({
+    "tags": ["Organizations"],
+    "summary": "Organizasyon lokasyonunu güncelle",
+    "description": "Hava durumu ve enerji hesaplamaları için lokasyon ayarla.",
+    "parameters": [
+        {"name": "org_id", "in": "path", "type": "string", "required": True},
+        {
+            "name": "body",
+            "in": "body",
+            "required": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number", "example": 41.0082},
+                    "longitude": {"type": "number", "example": 28.9784},
+                    "city": {"type": "string", "example": "Istanbul"},
+                    "country": {"type": "string", "example": "TR"}
+                },
+                "required": ["latitude", "longitude"]
+            }
+        }
+    ],
+    "responses": {
+        200: {"description": "Lokasyon güncellendi"},
+        400: {"description": "Geçersiz koordinatlar"},
+        401: {"description": "Yetkisiz erişim"},
+        403: {"description": "Yetki yok"},
+        404: {"description": "Organizasyon bulunamadı"}
+    }
+})
+def update_organization_location(org_id):
+    """Organizasyon lokasyonunu güncelle."""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    org = Organization.query.get_or_404(org_id)
+    
+    # Yetki kontrolü - admin veya super_admin
+    user_role_code = user.role.code if user.role else None
+    if user_role_code not in ["super_admin", "admin"]:
+        return jsonify({"error": "Forbidden"}), 403
+    if user_role_code == "admin" and user.organization_id != org.id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    data = request.get_json()
+    
+    # Koordinat validasyonu
+    lat = data.get("latitude") or data.get("lat")
+    lon = data.get("longitude") or data.get("lon")
+    
+    if lat is None or lon is None:
+        return jsonify({"error": "latitude and longitude are required"}), 400
+    
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid coordinate format"}), 400
+    
+    if not (-90 <= lat <= 90):
+        return jsonify({"error": "Latitude must be between -90 and 90"}), 400
+    if not (-180 <= lon <= 180):
+        return jsonify({"error": "Longitude must be between -180 and 180"}), 400
+    
+    # Lokasyonu güncelle
+    org.location = {
+        "latitude": lat,
+        "longitude": lon,
+        "city": data.get("city"),
+        "country": data.get("country", "TR")
+    }
+    
+    # Timezone da güncellenebilir
+    if "timezone" in data:
+        org.timezone = data["timezone"]
+    
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Location updated",
+        "location": org.location,
+        "timezone": org.timezone
+    })

@@ -34,6 +34,9 @@ from .asset_service import (
 # EPİAŞ Entegrasyonu
 from .epias_service import EpiasService, epias_service
 
+# OpenWeather Entegrasyonu
+from .weather_service import OpenWeatherService, weather_service
+
 __all__ = [
     # v6.0 Core
     "ShellyService",
@@ -60,4 +63,7 @@ __all__ = [
     # EPİAŞ
     "EpiasService",
     "epias_service",
+    # OpenWeather
+    "OpenWeatherService",
+    "weather_service",
 ]

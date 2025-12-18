@@ -1,20 +1,64 @@
-# Docker Compose dosyası - Awaxen Backend Stack v6.0
-# Celery + Redis + TimescaleDB + MQTT
+# ============================================
+# Awaxen Backend Stack v6.0 - Docker Compose
+# Production-ready configuration
+# ============================================
+# 
+# Usage:
+#   Development: docker-compose up -d
+#   Production:  docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   Logs:        docker-compose logs -f backend
+#   Scale:       docker-compose up -d --scale celery_worker=3
+
+x-common-env: &common-env
+  # Database
+  DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+  # Celery
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+  # Redis Cache
+  REDIS_URL: redis://redis:6379/1
+  # MQTT
+  MQTT_BROKER_URL: mqtt
+  MQTT_BROKER_PORT: ${MQTT_BROKER_PORT:-1883}
+  MQTT_USERNAME: ${MQTT_USERNAME}
+  MQTT_PASSWORD: ${MQTT_PASSWORD}
+  MQTT_SENSOR_TOPIC: ${MQTT_SENSOR_TOPIC:-awaxen/sensors/#}
+  MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-awaxen-backend}
+  # Auth0
+  AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+  AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+  # Encryption
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  # External APIs
+  OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+  EPIAS_USERNAME: ${EPIAS_USERNAME}
+  EPIAS_PASSWORD: ${EPIAS_PASSWORD}
+  # Flask
+  FLASK_ENV: ${FLASK_ENV:-production}
+  FLASK_DEBUG: ${FLASK_DEBUG:-false}
+  # Telegram
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+  # Logging
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
 services:
-  # --- 1. VERİTABANI SERVİSİ (TimescaleDB) ---
+  # ==========================================
+  # 1. DATABASE (TimescaleDB)
+  # ==========================================
   db:
-    image: timescale/timescaledb:latest-pg14
+    image: timescale/timescaledb:latest-pg15
     container_name: awaxen_timescale
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
     ports:
       - "5432:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
-    restart: always
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
     networks:
       - awaxen_net
     healthcheck:
@@ -22,17 +66,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
 
-  # --- 2. REDIS (Mesaj Kuyruğu & Cache) ---
-  # Celery broker ve result backend olarak kullanılır
+  # ==========================================
+  # 2. REDIS (Message Broker & Cache)
+  # ==========================================
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     container_name: awaxen_redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    restart: always
+    restart: unless-stopped
     networks:
       - awaxen_net
     healthcheck:
@@ -40,43 +93,27 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
 
-  # --- 3. BACKEND API (Flask) ---
+  # ==========================================
+  # 3. BACKEND API (Flask + Gunicorn)
+  # ==========================================
   backend:
-    build: .
+    build:
+      context: .
+      target: production
     container_name: awaxen_backend
-    command: python run.py
+    command: gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 2 --worker-class gevent --timeout 120 --keep-alive 5 --access-logfile - --error-logfile - run:app
     ports:
       - "5000:5000"
-    volumes:
-      - .:/app
-    environment: &backend_env
-      # Database
-      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      # Celery
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # MQTT
-      MQTT_BROKER_URL: mqtt
-      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT:-1883}
-      MQTT_USERNAME: ${MQTT_USERNAME}
-      MQTT_PASSWORD: ${MQTT_PASSWORD}
-      MQTT_SENSOR_TOPIC: ${MQTT_SENSOR_TOPIC:-awaxen/sensors/#}
-      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-awaxen-backend}
-      # Auth0
-      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
-      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
-      # Encryption (Token güvenliği için)
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      # External APIs
-      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
-      # EPİAŞ (Enerji Piyasası)
-      EPIAS_USERNAME: ${EPIAS_USERNAME}
-      EPIAS_PASSWORD: ${EPIAS_PASSWORD}
-      # Flask
-      FLASK_DEBUG: ${FLASK_DEBUG:-false}
-      # Telegram Bot
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    environment:
+      <<: *common-env
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-4}
     depends_on:
       db:
         condition: service_healthy
@@ -84,43 +121,94 @@ services:
         condition: service_healthy
       mqtt:
         condition: service_started
-    restart: always
+    restart: unless-stopped
     networks:
       - awaxen_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # --- 4. CELERY WORKER (İşçiler) ---
-  # Arka plan görevlerini çalıştırır: Shelly API, EPİAŞ, Otomasyon
+  # ==========================================
+  # 4. CELERY WORKER (Background Tasks)
+  # ==========================================
   celery_worker:
-    build: .
+    build:
+      context: .
+      target: production
     container_name: awaxen_worker
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
-    volumes:
-      - .:/app
-    environment: *backend_env
+    command: celery -A app.celery_app worker --loglevel=${LOG_LEVEL:-info} --concurrency=4 --prefetch-multiplier=2
+    environment:
+      <<: *common-env
+      C_FORCE_ROOT: "true"
     depends_on:
-      - backend
-      - redis
-    restart: always
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - awaxen_net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # --- 5. CELERY BEAT (Zamanlayıcı) ---
-  # Periyodik görevleri tetikler: "Her saat EPİAŞ fiyatlarını çek"
+  # ==========================================
+  # 5. CELERY BEAT (Task Scheduler)
+  # ==========================================
   celery_beat:
-    build: .
+    build:
+      context: .
+      target: production
     container_name: awaxen_beat
-    command: celery -A app.celery_app beat --loglevel=info
-    volumes:
-      - .:/app
-    environment: *backend_env
+    command: celery -A app.celery_app beat --loglevel=${LOG_LEVEL:-info} --pidfile=/tmp/celerybeat.pid
+    environment:
+      <<: *common-env
+      C_FORCE_ROOT: "true"
     depends_on:
-      - backend
-      - redis
-    restart: always
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     networks:
       - awaxen_net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # --- 6. MQTT Broker (Mosquitto) ---
+  # ==========================================
+  # 6. MQTT Broker (Mosquitto)
+  # ==========================================
   mqtt:
     image: eclipse-mosquitto:2
     container_name: awaxen_mqtt
@@ -128,14 +216,75 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./mosquitto/config:/mosquitto/config
-      - ./mosquitto/data:/mosquitto/data
-      - ./mosquitto/log:/mosquitto/log
-    restart: always
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    restart: unless-stopped
     networks:
       - awaxen_net
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
 
-  # --- 7. NGROK (Tunnel for Telegram Webhook) ---
+  # ==========================================
+  # 7. FLOWER (Celery Monitoring) - Optional
+  # ==========================================
+  flower:
+    build:
+      context: .
+      target: production
+    container_name: awaxen_flower
+    command: celery -A app.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
+    ports:
+      - "5555:5555"
+    environment:
+      <<: *common-env
+    depends_on:
+      - redis
+      - celery_worker
+    restart: unless-stopped
+    networks:
+      - awaxen_net
+    profiles:
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ==========================================
+  # 8. PGADMIN (Database Admin) - Optional
+  # ==========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: awaxen_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@awaxen.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASS:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - awaxen_net
+    profiles:
+      - tools
+
+  # ==========================================
+  # 9. NGROK (Tunnel) - Development Only
+  # ==========================================
   ngrok:
     image: ngrok/ngrok:latest
     container_name: awaxen_ngrok
@@ -146,29 +295,33 @@ services:
       - "4040:4040"
     depends_on:
       - backend
-    restart: always
+    restart: unless-stopped
     networks:
       - awaxen_net
+    profiles:
+      - development
 
-  # --- 8. PGADMIN (Veritabanı Yönetim Arayüzü) ---
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: awaxen_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@awaxen.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASS:-admin}
-    ports:
-      - "5050:80"
-    depends_on:
-      - db
-    restart: always
-    networks:
-      - awaxen_net
-
+# ==========================================
+# VOLUMES
+# ==========================================
 volumes:
   timescaledb_data:
+    driver: local
   redis_data:
+    driver: local
+  mosquitto_data:
+    driver: local
+  mosquitto_log:
+    driver: local
+  pgadmin_data:
+    driver: local
 
+# ==========================================
+# NETWORKS
+# ==========================================
 networks:
   awaxen_net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
