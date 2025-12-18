@@ -2,6 +2,7 @@
 EPİAŞ Piyasa Fiyatları Task'ları.
 
 Saatlik olarak EPİAŞ Şeffaf Platform'dan PTF/SMF verilerini çeker.
+Real-time fiyat güncellemeleri Socket.IO üzerinden yayınlanır.
 """
 from datetime import datetime, timedelta
 import requests
@@ -9,6 +10,7 @@ import logging
 
 from app.extensions import celery, db
 from app.models import MarketPrice
+from app.realtime import broadcast_price_update, redis_pubsub
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,24 @@ def fetch_epias_prices(self):
                 saved_count += 1
         
         db.session.commit()
+        
+        # Real-time: Güncel saatin fiyatını WebSocket üzerinden yayınla
+        current_hour = today.hour
+        current_price = next(
+            (p for p in prices if datetime.fromisoformat(
+                p.get('time', '').replace("Z", "+00:00")
+            ).hour == current_hour),
+            None
+        )
+        if current_price:
+            broadcast_price_update({
+                "price": current_price.get('price', current_price.get('ptf', 0) / 1000),
+                "ptf": current_price.get('ptf'),
+                "smf": current_price.get('smf'),
+                "hour": current_hour,
+                "date": today.strftime("%Y-%m-%d"),
+                "currency": "TRY"
+            })
         
         logger.info(f"EPİAŞ fiyatları güncellendi: {saved_count} yeni kayıt")
         

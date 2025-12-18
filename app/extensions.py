@@ -15,8 +15,14 @@ from celery.schedules import crontab
 db = SQLAlchemy()
 migrate = Migrate()
 
-# WebSocket
-socketio = SocketIO(cors_allowed_origins="*")
+# WebSocket - Redis message queue ile multi-instance desteği
+# async_mode None bırakılırsa Flask-SocketIO otomatik seçer
+socketio = SocketIO(
+    cors_allowed_origins="*",
+    async_mode=None,  # threading/eventlet/gevent otomatik seçilir
+    logger=True,
+    engineio_logger=False
+)
 
 # Celery - Application Factory Pattern için
 celery = Celery(__name__)

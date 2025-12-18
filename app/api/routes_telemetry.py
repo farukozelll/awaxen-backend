@@ -1,4 +1,4 @@
-"""Telemetri endpoint'leri - v6.0 (TimescaleDB)."""
+"""Telemetri endpoint'leri - v6.0 (TimescaleDB + Real-Time)."""
 from datetime import datetime, timedelta
 from flask import jsonify, request
 from sqlalchemy import func
@@ -8,6 +8,7 @@ from .helpers import get_current_user, parse_iso_datetime
 from app.extensions import db
 from app.models import SmartDevice, DeviceTelemetry
 from app.auth import requires_auth
+from app.realtime import emit_telemetry, emit_device_status, redis_pubsub
 
 
 @api_bp.route('/telemetry', methods=['POST'])
@@ -69,10 +70,33 @@ def receive_telemetry():
         db.session.add(telemetry)
 
         # Cihaz durumunu güncelle
+        was_offline = not device.is_online
         device.is_online = True
         device.last_seen = datetime.utcnow()
         
         db.session.commit()
+
+        # Real-time: Telemetri verisini WebSocket üzerinden yayınla
+        org_id = str(device.organization_id) if device.organization_id else None
+        if org_id:
+            # Dashboard'a canlı telemetri gönder
+            emit_telemetry(org_id, str(device.id), {
+                "power_w": data.get('power'),
+                "voltage": data.get('voltage'),
+                "current": data.get('current'),
+                "energy_total_kwh": data.get('energy_total_kwh'),
+                "temperature": data.get('temperature'),
+                "humidity": data.get('humidity'),
+                "time": telemetry.time.isoformat() if telemetry.time else None
+            })
+            
+            # Cihaz online olduysa durum değişikliği bildir
+            if was_offline:
+                emit_device_status(org_id, str(device.id), {
+                    "is_online": True,
+                    "last_seen": device.last_seen.isoformat(),
+                    "event": "device_online"
+                })
 
         return jsonify({"status": "success", "device_id": str(device.id)}), 201
 

@@ -110,3 +110,47 @@ class NotificationChannel(str, Enum):
     EMAIL = "email"
     PUSH = "push"
     SMS = "sms"
+
+
+class PaymentProvider(str, Enum):
+    """Ödeme sağlayıcıları."""
+    STRIPE = "stripe"
+    IYZICO = "iyzico"
+    PAYTR = "paytr"
+
+
+class InvoiceStatus(str, Enum):
+    """Fatura durumu."""
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    REFUNDED = "refunded"
+    CANCELLED = "cancelled"
+
+
+class FirmwareUpdateStatus(str, Enum):
+    """Firmware güncelleme durumu."""
+    PENDING = "pending"
+    DOWNLOADING = "downloading"
+    INSTALLING = "installing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ExportStatus(str, Enum):
+    """Veri ihracatı durumu."""
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class ExportType(str, Enum):
+    """Veri ihracatı tipi."""
+    TELEMETRY = "telemetry"
+    DEVICES = "devices"
+    AUTOMATIONS = "automations"
+    INVOICES = "invoices"
+    AUDIT_LOGS = "audit_logs"

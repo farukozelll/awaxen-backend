@@ -17,6 +17,9 @@ from app.models.wallet import Wallet, WalletTransaction
 from app.models.notification import Notification
 from app.models.audit import AuditLog
 from app.models.weather import WeatherData, WeatherForecast
+from app.models.billing import SubscriptionPlan, Subscription, Invoice, PaymentMethod
+from app.models.firmware import Firmware, FirmwareUpdate
+from app.models.export import DataExport
 from app.models.enums import (
     OrganizationType,
     DeviceStatus,
@@ -69,4 +72,14 @@ __all__ = [
     # Weather
     "WeatherData",
     "WeatherForecast",
+    # Billing
+    "SubscriptionPlan",
+    "Subscription",
+    "Invoice",
+    "PaymentMethod",
+    # Firmware
+    "Firmware",
+    "FirmwareUpdate",
+    # Export
+    "DataExport",
 ]

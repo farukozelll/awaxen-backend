@@ -38,6 +38,18 @@ from . import routes_notifications
 from . import routes_users
 from . import routes_roles  # RBAC - Rol ve Yetki Yönetimi
 from .routes_weather import weather_bp
+from .routes_billing import billing_bp
+from .routes_firmware import firmware_bp
+from .routes_export import export_bp
 
 # Weather Blueprint
 api_bp.register_blueprint(weather_bp, url_prefix="/weather")
+
+# Billing Blueprint
+api_bp.register_blueprint(billing_bp, url_prefix="/billing")
+
+# Firmware/OTA Blueprint
+api_bp.register_blueprint(firmware_bp)
+
+# Data Export Blueprint
+api_bp.register_blueprint(export_bp)
