@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -51,7 +50,7 @@ def get_current_user() -> Optional[User]:
 get_or_create_user = get_current_user
 
 
-def parse_iso_datetime(value: Optional[str]):
+def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
     try:
@@ -88,7 +87,7 @@ def paginate_response(items: List[Any], total: int, page: int, page_size: int) -
     }
 
 
-def apply_sorting(query, model, sort_by: str, sort_order: str, allowed_fields: List[str]):
+def apply_sorting(query: Any, model: Any, sort_by: str, sort_order: str, allowed_fields: List[str]) -> Any:
     if sort_by not in allowed_fields:
         sort_by = "id"
 
