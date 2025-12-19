@@ -53,3 +53,7 @@ api_bp.register_blueprint(firmware_bp)
 
 # Data Export Blueprint
 api_bp.register_blueprint(export_bp)
+
+# AI Detection Blueprint
+from .routes_ai import ai_bp
+api_bp.register_blueprint(ai_bp, url_prefix="/ai")

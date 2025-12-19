@@ -40,6 +40,12 @@ x-common-env: &common-env
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
   # Logging
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  # MinIO (Object Storage)
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+  MINIO_BUCKET: ${MINIO_BUCKET:-awaxen-images}
+  MINIO_SECURE: "false"
 
 services:
   # ==========================================
@@ -121,6 +127,8 @@ services:
         condition: service_healthy
       mqtt:
         condition: service_started
+      minio:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - awaxen_net
@@ -141,6 +149,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
   # ==========================================
   # 4. CELERY WORKER (Background Tasks)
@@ -301,6 +311,113 @@ services:
     profiles:
       - development
 
+  # ==========================================
+  # 10. WATCHTOWER (Auto-Update)
+  # ==========================================
+  # Docker Hub'a yeni imaj attığında otomatik günceller
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: awaxen_watchtower
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: 300  # 5 dakikada bir kontrol
+      WATCHTOWER_INCLUDE_STOPPED: "false"
+      WATCHTOWER_REVIVE_STOPPED: "false"
+      WATCHTOWER_NOTIFICATIONS: "shoutrrr"
+      WATCHTOWER_NOTIFICATION_URL: ${WATCHTOWER_NOTIFICATION_URL:-}
+      WATCHTOWER_LABEL_ENABLE: "true"  # Sadece label'lı container'ları güncelle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    networks:
+      - awaxen_net
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"  # Kendini güncellemesin
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ==========================================
+  # 11. MINIO (S3-Compatible Object Storage)
+  # ==========================================
+  minio:
+    image: minio/minio:latest
+    container_name: awaxen_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    networks:
+      - awaxen_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # ==========================================
+  # 12. AI WORKER (YOLO + SAM2 - Ayrı Konteyner)
+  # ==========================================
+  # PyTorch ve AI kütüphaneleri çok büyük, ayrı konteyner gerekli
+  ai_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+    container_name: awaxen_ai_worker
+    command: celery -A app.celery_app worker --loglevel=${LOG_LEVEL:-info} --concurrency=2 --queues=ai_tasks -n ai_worker@%h
+    environment:
+      <<: *common-env
+      C_FORCE_ROOT: "true"
+      # MinIO Configuration
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-awaxen-images}
+      MINIO_SECURE: "false"
+      # AI Configuration
+      AI_MODEL_PATH: /app/models
+      AI_CONFIDENCE_THRESHOLD: ${AI_CONFIDENCE_THRESHOLD:-0.40}
+      ENABLE_SAHI: ${ENABLE_SAHI:-true}
+    volumes:
+      - ai_models:/app/models
+      - ai_cache:/root/.cache
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - awaxen_net
+    deploy:
+      resources:
+        limits:
+          memory: 4G  # AI modelleri için yüksek RAM
+        reservations:
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
 # ==========================================
 # VOLUMES
 # ==========================================
@@ -314,6 +431,12 @@ volumes:
   mosquitto_log:
     driver: local
   pgadmin_data:
+    driver: local
+  minio_data:
+    driver: local
+  ai_models:
+    driver: local
+  ai_cache:
     driver: local
 
 # ==========================================

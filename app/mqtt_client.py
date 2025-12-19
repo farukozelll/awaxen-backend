@@ -187,9 +187,23 @@ def _sanitize_broker_url(raw: str) -> str:
     return raw.rstrip("/")
 
 
-def init_mqtt_client(app, max_retries: int = 5, retry_delay: float = 2.0):
-    """MQTT client'ı başlat."""
+def _on_disconnect(client: mqtt.Client, userdata, reason_code):
+    """Bağlantı koptuğunda çağrılır - otomatik reconnect tetikler."""
+    logger.warning(f"[MQTT] Bağlantı koptu: rc={reason_code}")
+    # Paho MQTT v2.0+ otomatik reconnect yapıyor, sadece log
+
+
+def init_mqtt_client(app, reconnect_delay_min: float = 1.0, reconnect_delay_max: float = 120.0):
+    """
+    MQTT client'ı başlat - sonsuz reconnect döngüsü ile.
+    
+    Args:
+        app: Flask application
+        reconnect_delay_min: Minimum reconnect bekleme süresi (saniye)
+        reconnect_delay_max: Maximum reconnect bekleme süresi (saniye)
+    """
     import time
+    import threading
 
     global _client
     if _client is not None:
@@ -227,19 +241,52 @@ def init_mqtt_client(app, max_retries: int = 5, retry_delay: float = 2.0):
     client.user_data_set({"app": app})
     client.on_connect = _on_connect
     client.on_message = _on_message
+    client.on_disconnect = _on_disconnect
+    
+    # Paho MQTT v2.0+ için otomatik reconnect ayarları
+    client.reconnect_delay_set(
+        min_delay=reconnect_delay_min,
+        max_delay=reconnect_delay_max
+    )
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(f"[MQTT] Bağlanılıyor: {broker_host}:{port} ({attempt}/{max_retries})")
-            client.connect(broker_host, port, keepalive=60)
-            client.loop_start()
-            _client = client
-            logger.info(f"[MQTT] Bağlantı başarılı: {broker_host}:{port}")
-            return _client
-        except Exception as exc:
-            logger.warning(f"[MQTT] Bağlantı hatası ({attempt}): {exc}")
-            if attempt < max_retries:
-                time.sleep(retry_delay)
+    def connect_with_infinite_retry():
+        """Sonsuz döngüde bağlanmaya çalış."""
+        global _client
+        attempt = 0
+        current_delay = reconnect_delay_min
+        
+        while True:
+            attempt += 1
+            try:
+                logger.info(f"[MQTT] Bağlanılıyor: {broker_host}:{port} (deneme #{attempt})")
+                client.connect(broker_host, port, keepalive=60)
+                client.loop_start()
+                _client = client
+                logger.info(f"[MQTT] Bağlantı başarılı: {broker_host}:{port}")
+                return
+            except Exception as exc:
+                logger.warning(f"[MQTT] Bağlantı hatası (#{attempt}): {exc}")
+                logger.info(f"[MQTT] {current_delay:.1f}s sonra tekrar denenecek...")
+                time.sleep(current_delay)
+                # Exponential backoff with max limit
+                current_delay = min(current_delay * 2, reconnect_delay_max)
 
-    logger.error(f"[MQTT] {max_retries} deneme sonrası bağlanılamadı")
-    return None
+    # İlk bağlantıyı dene, başarısız olursa arka planda devam et
+    try:
+        logger.info(f"[MQTT] İlk bağlantı deneniyor: {broker_host}:{port}")
+        client.connect(broker_host, port, keepalive=60)
+        client.loop_start()
+        _client = client
+        logger.info(f"[MQTT] Bağlantı başarılı: {broker_host}:{port}")
+        return _client
+    except Exception as exc:
+        logger.warning(f"[MQTT] İlk bağlantı başarısız: {exc}")
+        logger.info("[MQTT] Arka planda sonsuz reconnect başlatılıyor...")
+        # Arka plan thread'inde sonsuz döngü başlat
+        reconnect_thread = threading.Thread(
+            target=connect_with_infinite_retry,
+            daemon=True,
+            name="mqtt-reconnect"
+        )
+        reconnect_thread.start()
+        return None  # İlk bağlantı başarısız ama arka planda denenecek

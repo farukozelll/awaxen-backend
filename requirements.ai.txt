@@ -1,0 +1,27 @@
+# ============================================
+# Awaxen AI Worker - AI Dependencies
+# ============================================
+
+# YOLO (Ultralytics)
+ultralytics>=8.0.0
+
+# ONNX Runtime (CPU - RPi uyumlu)
+onnxruntime>=1.16.0
+
+# SAM2 (Segment Anything Model 2)
+# Not: SAM2 henüz pip'te yok, manuel kurulum gerekebilir
+# segment-anything-2>=1.0.0
+
+# SAHI (Slicing Aided Hyper Inference)
+sahi>=0.11.0
+
+# Image Processing
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# MinIO/S3 Client
+boto3>=1.28.0
+
+# Shapely (polygon operations)
+shapely>=2.0.0

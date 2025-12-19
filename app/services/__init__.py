@@ -37,6 +37,9 @@ from .epias_service import EpiasService, epias_service
 # OpenWeather Entegrasyonu
 from .weather_service import OpenWeatherService, weather_service
 
+# Storage (MinIO/S3)
+from .storage_service import StorageService, get_storage_service
+
 __all__ = [
     # v6.0 Core
     "ShellyService",
@@ -66,4 +69,7 @@ __all__ = [
     # OpenWeather
     "OpenWeatherService",
     "weather_service",
+    # Storage
+    "StorageService",
+    "get_storage_service",
 ]

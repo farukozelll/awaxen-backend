@@ -20,6 +20,7 @@ from app.models.weather import WeatherData, WeatherForecast
 from app.models.billing import SubscriptionPlan, Subscription, Invoice, PaymentMethod
 from app.models.firmware import Firmware, FirmwareUpdate
 from app.models.export import DataExport
+from app.models.ai_analysis import AIAnalysisTask, AIDetection, AITaskStatus, DefectType
 from app.models.enums import (
     OrganizationType,
     DeviceStatus,
@@ -82,4 +83,9 @@ __all__ = [
     "FirmwareUpdate",
     # Export
     "DataExport",
+    # AI Analysis
+    "AIAnalysisTask",
+    "AIDetection",
+    "AITaskStatus",
+    "DefectType",
 ]

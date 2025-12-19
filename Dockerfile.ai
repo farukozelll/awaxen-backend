@@ -1,0 +1,87 @@
+# ============================================
+# Awaxen AI Worker - Dockerfile
+# YOLO + SAM2 + SAHI için optimize edilmiş
+# ============================================
+
+# Stage 1: Builder
+FROM python:3.11-slim as builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libpq-dev \
+        gcc \
+        python3-dev \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install base Python dependencies first
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Install AI-specific dependencies
+COPY requirements.ai.txt .
+RUN pip install --no-cache-dir -r requirements.ai.txt
+
+
+# Stage 2: Production
+FROM python:3.11-slim as production
+
+# Labels
+LABEL maintainer="Awaxen Team"
+LABEL version="1.0"
+LABEL description="Awaxen AI Worker - YOLO + SAM2 Detection"
+
+# Environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONFAULTHANDLER=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    APP_HOME=/app \
+    # ONNX Runtime optimization
+    OMP_NUM_THREADS=4 \
+    # Disable GPU (CPU-only for RPi compatibility)
+    CUDA_VISIBLE_DEVICES=""
+
+WORKDIR $APP_HOME
+
+# Install runtime dependencies (OpenCV needs these)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libpq5 \
+        curl \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        libsm6 \
+        libxext6 \
+        libxrender-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user
+RUN groupadd --gid 1000 appgroup \
+    && useradd --uid 1000 --gid appgroup --shell /bin/bash --create-home appuser
+
+# Create models directory
+RUN mkdir -p /app/models && chown -R appuser:appgroup /app/models
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+
+# Copy application code
+COPY --chown=appuser:appgroup . .
+
+# Switch to non-root user
+USER appuser
+
+# Expose nothing (worker doesn't serve HTTP)
+# Default command
+CMD ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=2", "--queues=ai_tasks"]
