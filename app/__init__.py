@@ -18,6 +18,7 @@ from flasgger import Swagger
 from .extensions import db, migrate, socketio, celery, init_celery
 from .version import APP_VERSION
 from .constants import DEFAULT_TIMEZONE
+from .config import get_config
 
 # Logging configuration
 logging.basicConfig(
@@ -39,17 +40,6 @@ def _get_required_env(key: str) -> str:
 def _get_env(key: str, default: str = None) -> Optional[str]:
     """Opsiyonel environment variable'ı al."""
     return os.getenv(key, default)
-
-
-def _get_database_url() -> Optional[str]:
-    """
-    Veritabanı URL'sini environment'tan al.
-    Neon.tech/Render bazen 'postgres://' verir ama SQLAlchemy 'postgresql://' ister.
-    """
-    db_url = os.environ.get("DATABASE_URL")
-    if db_url and db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
-    return db_url
 
 
 def _env_flag(value: Optional[str], default: bool = True) -> bool:
@@ -130,19 +120,12 @@ def create_app() -> Flask:
         max_age=86400,  # Preflight cache 24 saat
     )
 
-    # Application configuration
+    # Load configuration from config class
+    config_class = get_config()
+    app.config.from_object(config_class)
+    
+    # Additional runtime configuration
     app.config.update(
-        # Database
-        SQLALCHEMY_DATABASE_URI=_get_database_url(),
-        SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        SQLALCHEMY_ENGINE_OPTIONS={
-            "pool_pre_ping": True,
-            "pool_recycle": 300,
-        },
-        
-        # Celery
-        CELERY_BROKER_URL=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
-        CELERY_RESULT_BACKEND=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
         
         # Swagger - Professional Configuration
         SWAGGER={
