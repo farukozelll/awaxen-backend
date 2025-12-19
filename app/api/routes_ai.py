@@ -14,8 +14,9 @@ from uuid import UUID
 
 from flask import Blueprint, request, jsonify, g
 from werkzeug.utils import secure_filename
+from flasgger import swag_from
 
-from app.auth import require_auth, get_current_user
+from app.auth import requires_auth, get_db_user
 from app.extensions import db
 from app.models import AIAnalysisTask, AITaskStatus, SmartAsset
 from app.services.storage_service import get_storage_service
@@ -29,6 +30,51 @@ ai_bp = Blueprint("ai", __name__)
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "tiff", "bmp"}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
+# Swagger Definitions
+AI_SWAGGER_DEFINITIONS = {
+    "AITask": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "format": "uuid"},
+            "status": {"type": "string", "enum": ["pending", "processing", "completed", "failed"]},
+            "progress": {"type": "integer", "example": 75},
+            "detection_count": {"type": "integer", "example": 3},
+            "processing_time_ms": {"type": "integer", "example": 1250},
+            "model_version": {"type": "string", "example": "yolo11_solar_v1"},
+            "created_at": {"type": "string", "format": "date-time"},
+            "completed_at": {"type": "string", "format": "date-time"},
+        },
+    },
+    "AIDetection": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "format": "uuid"},
+            "defect_class": {"type": "string", "example": "hotspot"},
+            "confidence": {"type": "number", "example": 0.92},
+            "bbox": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number"},
+                    "y": {"type": "number"},
+                    "width": {"type": "number"},
+                    "height": {"type": "number"},
+                },
+            },
+            "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+        },
+    },
+    "AIStats": {
+        "type": "object",
+        "properties": {
+            "total_tasks": {"type": "integer"},
+            "completed_tasks": {"type": "integer"},
+            "total_detections": {"type": "integer"},
+            "avg_processing_time_ms": {"type": "number"},
+            "defect_distribution": {"type": "object"},
+        },
+    },
+}
+
 
 def _allowed_file(filename: str) -> bool:
     """Dosya uzantısı izinli mi?"""
@@ -36,46 +82,77 @@ def _allowed_file(filename: str) -> bool:
 
 
 @ai_bp.route("/detect", methods=["POST"])
-@require_auth
+@requires_auth
+@swag_from({
+    "tags": ["AI Vision"],
+    "summary": "Güneş paneli hata tespiti başlat",
+    "description": """
+Yüklenen görüntüde YOLO + SAM2 modelleri ile güneş paneli hatalarını tespit eder.
+
+**Desteklenen Hata Türleri:**
+- `hotspot`: Sıcak nokta (termal anomali)
+- `crack`: Çatlak
+- `soiling`: Kirlilik/toz
+- `shading`: Gölgelenme
+- `delamination`: Delaminasyon
+- `snail_trail`: Salyangoz izi
+
+**İşlem Akışı:**
+1. Resim MinIO'ya yüklenir
+2. Celery task'ı başlatılır
+3. Task ID döner, polling ile sonuç sorgulanır
+    """,
+    "consumes": ["multipart/form-data"],
+    "parameters": [
+        {
+            "name": "image",
+            "in": "formData",
+            "type": "file",
+            "required": True,
+            "description": "Analiz edilecek görüntü (PNG, JPG, WEBP, max 50MB)",
+        },
+        {
+            "name": "asset_id",
+            "in": "formData",
+            "type": "string",
+            "required": False,
+            "description": "İlişkili güneş paneli asset UUID",
+        },
+        {
+            "name": "enable_sahi",
+            "in": "formData",
+            "type": "boolean",
+            "required": False,
+            "description": "SAHI modu (yüksek çözünürlüklü görüntüler için)",
+        },
+        {
+            "name": "confidence_threshold",
+            "in": "formData",
+            "type": "number",
+            "required": False,
+            "description": "Güven eşiği (0.0-1.0, varsayılan: 0.40)",
+        },
+    ],
+    "responses": {
+        202: {
+            "description": "Task oluşturuldu, işlem başladı",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "format": "uuid"},
+                    "status": {"type": "string", "example": "pending"},
+                    "message": {"type": "string"},
+                    "poll_url": {"type": "string"},
+                },
+            },
+        },
+        400: {"description": "Geçersiz istek (dosya eksik veya format hatası)"},
+        413: {"description": "Dosya boyutu çok büyük (max 50MB)"},
+    },
+    "definitions": AI_SWAGGER_DEFINITIONS,
+})
 def create_detection_task():
-    """
-    Yeni AI detection task'ı oluştur.
-    
-    ---
-    tags:
-      - AI Detection
-    consumes:
-      - multipart/form-data
-    parameters:
-      - name: image
-        in: formData
-        type: file
-        required: true
-        description: Analiz edilecek görüntü (PNG, JPG, WEBP)
-      - name: asset_id
-        in: formData
-        type: string
-        required: false
-        description: İlişkili asset UUID (opsiyonel)
-      - name: enable_sahi
-        in: formData
-        type: boolean
-        required: false
-        description: SAHI (yüksek çözünürlük) modu aktif mi
-      - name: confidence_threshold
-        in: formData
-        type: number
-        required: false
-        description: Güven eşiği (0.0-1.0, varsayılan 0.40)
-    responses:
-      202:
-        description: Task oluşturuldu, işlem başladı
-      400:
-        description: Geçersiz istek
-      413:
-        description: Dosya çok büyük
-    """
-    user = get_current_user()
+    user = get_db_user()
     
     # Dosya kontrolü
     if "image" not in request.files:
@@ -181,27 +258,39 @@ def create_detection_task():
 
 
 @ai_bp.route("/tasks/<task_id>", methods=["GET"])
-@require_auth
+@requires_auth
+@swag_from({
+    "tags": ["AI Vision"],
+    "summary": "Task durumunu sorgula (polling)",
+    "description": """
+Task'ın işlenme durumunu sorgular. Frontend bu endpoint'i polling ile çağırmalıdır.
+
+**Status Değerleri:**
+- `pending`: Kuyrukta bekliyor
+- `processing`: İşleniyor (progress: 0-100)
+- `completed`: Tamamlandı, sonuçlar hazır
+- `failed`: Hata oluştu
+    """,
+    "parameters": [
+        {
+            "name": "task_id",
+            "in": "path",
+            "type": "string",
+            "required": True,
+            "description": "Task UUID",
+        },
+    ],
+    "responses": {
+        200: {
+            "description": "Task durumu ve sonuçları",
+            "schema": {"$ref": "#/definitions/AITask"},
+        },
+        404: {"description": "Task bulunamadı"},
+    },
+    "definitions": AI_SWAGGER_DEFINITIONS,
+})
 def get_task_status(task_id: str):
-    """
-    Task durumunu sorgula.
-    
-    ---
-    tags:
-      - AI Detection
-    parameters:
-      - name: task_id
-        in: path
-        type: string
-        required: true
-        description: Task UUID
-    responses:
-      200:
-        description: Task durumu
-      404:
-        description: Task bulunamadı
-    """
-    user = get_current_user()
+    user = get_db_user()
     
     try:
         task = AIAnalysisTask.query.filter_by(
@@ -231,40 +320,60 @@ def get_task_status(task_id: str):
 
 
 @ai_bp.route("/tasks", methods=["GET"])
-@require_auth
+@requires_auth
+@swag_from({
+    "tags": ["AI Vision"],
+    "summary": "AI task'larını listele",
+    "description": "Organizasyona ait tüm AI analiz task'larını listeler.",
+    "parameters": [
+        {
+            "name": "status",
+            "in": "query",
+            "type": "string",
+            "enum": ["pending", "processing", "completed", "failed"],
+            "required": False,
+            "description": "Durum filtresi",
+        },
+        {
+            "name": "asset_id",
+            "in": "query",
+            "type": "string",
+            "required": False,
+            "description": "Asset UUID filtresi",
+        },
+        {
+            "name": "limit",
+            "in": "query",
+            "type": "integer",
+            "default": 20,
+            "description": "Sayfa başına kayıt (max 100)",
+        },
+        {
+            "name": "offset",
+            "in": "query",
+            "type": "integer",
+            "default": 0,
+            "description": "Başlangıç offset'i",
+        },
+    ],
+    "responses": {
+        200: {
+            "description": "Task listesi",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "tasks": {"type": "array", "items": {"$ref": "#/definitions/AITask"}},
+                    "total": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                },
+            },
+        },
+    },
+    "definitions": AI_SWAGGER_DEFINITIONS,
+})
 def list_tasks():
-    """
-    Tüm AI task'larını listele.
-    
-    ---
-    tags:
-      - AI Detection
-    parameters:
-      - name: status
-        in: query
-        type: string
-        required: false
-        description: Durum filtresi (pending, processing, completed, failed)
-      - name: asset_id
-        in: query
-        type: string
-        required: false
-        description: Asset UUID filtresi
-      - name: limit
-        in: query
-        type: integer
-        required: false
-        description: Sayfa başına kayıt (varsayılan 20, max 100)
-      - name: offset
-        in: query
-        type: integer
-        required: false
-        description: Başlangıç offset'i
-    responses:
-      200:
-        description: Task listesi
-    """
-    user = get_current_user()
+    user = get_db_user()
     
     # Query parametreleri
     status_filter = request.args.get("status")
@@ -302,26 +411,27 @@ def list_tasks():
 
 
 @ai_bp.route("/tasks/<task_id>", methods=["DELETE"])
-@require_auth
+@requires_auth
+@swag_from({
+    "tags": ["AI Vision"],
+    "summary": "AI task'ı sil",
+    "description": "Task'ı ve ilişkili MinIO dosyalarını siler.",
+    "parameters": [
+        {
+            "name": "task_id",
+            "in": "path",
+            "type": "string",
+            "required": True,
+            "description": "Silinecek task UUID",
+        },
+    ],
+    "responses": {
+        200: {"description": "Task başarıyla silindi"},
+        404: {"description": "Task bulunamadı"},
+    },
+})
 def delete_task(task_id: str):
-    """
-    Task'ı sil.
-    
-    ---
-    tags:
-      - AI Detection
-    parameters:
-      - name: task_id
-        in: path
-        type: string
-        required: true
-    responses:
-      200:
-        description: Task silindi
-      404:
-        description: Task bulunamadı
-    """
-    user = get_current_user()
+    user = get_db_user()
     
     try:
         task = AIAnalysisTask.query.filter_by(
@@ -353,19 +463,28 @@ def delete_task(task_id: str):
 
 
 @ai_bp.route("/stats", methods=["GET"])
-@require_auth
+@requires_auth
+@swag_from({
+    "tags": ["AI Vision"],
+    "summary": "AI analiz istatistikleri",
+    "description": """
+Organizasyona ait AI analiz istatistiklerini döner.
+
+**İçerik:**
+- Task sayıları (status bazında)
+- Hata tipi dağılımı
+- Ortalama işlem süresi
+    """,
+    "responses": {
+        200: {
+            "description": "İstatistikler",
+            "schema": {"$ref": "#/definitions/AIStats"},
+        },
+    },
+    "definitions": AI_SWAGGER_DEFINITIONS,
+})
 def get_ai_stats():
-    """
-    AI analiz istatistikleri.
-    
-    ---
-    tags:
-      - AI Detection
-    responses:
-      200:
-        description: İstatistikler
-    """
-    user = get_current_user()
+    user = get_db_user()
     
     from sqlalchemy import func
     from app.models import AIDetection, DefectType

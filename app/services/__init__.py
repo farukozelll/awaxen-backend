@@ -40,6 +40,10 @@ from .weather_service import OpenWeatherService, weather_service
 # Storage (MinIO/S3)
 from .storage_service import StorageService, get_storage_service
 
+# Monitoring
+from .watchdog_service import WatchdogService, get_watchdog_service
+from .anomaly_service import AnomalyDetector, get_anomaly_detector
+
 __all__ = [
     # v6.0 Core
     "ShellyService",
@@ -72,4 +76,9 @@ __all__ = [
     # Storage
     "StorageService",
     "get_storage_service",
+    # Monitoring
+    "WatchdogService",
+    "get_watchdog_service",
+    "AnomalyDetector",
+    "get_anomaly_detector",
 ]

@@ -133,21 +133,125 @@ def create_app() -> Flask:
         CELERY_BROKER_URL=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
         CELERY_RESULT_BACKEND=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0"),
         
-        # Swagger
+        # Swagger - Professional Configuration
         SWAGGER={
             "title": "Awaxen IoT Platform API",
             "version": APP_VERSION,
             "uiversion": 3,
-            "description": "Hibrit Enerji Yönetim Platformu - SaaS Backend",
+            "description": """
+# 🌞 Awaxen Hibrit Enerji Yönetim Platformu
+
+**Enterprise-grade IoT & Energy Management SaaS Backend**
+
+## 🔑 Authentication
+Tüm API endpoint'leri JWT Bearer token gerektirir. Token'ı Auth0'dan alabilirsiniz.
+
+```
+Authorization: Bearer <your_jwt_token>
+```
+
+## 📊 API Grupları
+
+| Grup | Açıklama |
+|------|----------|
+| **Organizations** | Tenant (organizasyon) yönetimi |
+| **Devices** | IoT cihaz CRUD işlemleri |
+| **Assets** | Güneş paneli, inverter vb. varlık yönetimi |
+| **Telemetry** | Sensör verileri ve zaman serisi |
+| **AI Vision** | YOLO + SAM2 ile panel hata tespiti |
+| **Automations** | Kural tabanlı otomasyon |
+| **Market** | EPİAŞ elektrik fiyatları |
+| **Monitoring** | Watchdog & Anomaly Detection |
+
+## 🚀 Rate Limiting
+- Standard: 100 req/min
+- AI Endpoints: 10 req/min
+
+## 📝 Pagination
+Tüm liste endpoint'leri pagination destekler:
+- `page`: Sayfa numarası (default: 1)
+- `pageSize`: Sayfa başına kayıt (default: 20, max: 100)
+            """,
+            "termsOfService": "https://awaxen.com/terms",
+            "contact": {
+                "name": "Awaxen API Support",
+                "url": "https://awaxen.com/support",
+                "email": "api@awaxen.com",
+            },
+            "license": {
+                "name": "Proprietary",
+                "url": "https://awaxen.com/license",
+            },
+            "host": os.getenv("API_HOST", "localhost:5000"),
+            "basePath": "/api",
+            "schemes": ["https", "http"],
             "securityDefinitions": {
                 "bearerAuth": {
                     "type": "apiKey",
                     "name": "Authorization",
                     "in": "header",
-                    "description": "Bearer <JWT> formatında token giriniz",
+                    "description": "JWT Bearer Token. Format: `Bearer <token>`",
                 }
             },
             "security": [{"bearerAuth": []}],
+            "tags": [
+                {
+                    "name": "Meta",
+                    "description": "🔧 Health check, version ve sistem bilgileri",
+                },
+                {
+                    "name": "Organizations",
+                    "description": "🏢 Tenant (organizasyon) yönetimi - SaaS multi-tenancy",
+                },
+                {
+                    "name": "Users",
+                    "description": "👥 Kullanıcı yönetimi ve RBAC",
+                },
+                {
+                    "name": "Devices",
+                    "description": "📱 IoT cihaz CRUD işlemleri (Shelly, Tuya, vb.)",
+                },
+                {
+                    "name": "Assets",
+                    "description": "☀️ Güneş paneli, inverter, batarya varlık yönetimi",
+                },
+                {
+                    "name": "Telemetry",
+                    "description": "📊 Sensör verileri, zaman serisi ve grafikler",
+                },
+                {
+                    "name": "AI Vision",
+                    "description": "🤖 YOLO + SAM2 ile güneş paneli hata tespiti",
+                },
+                {
+                    "name": "Automations",
+                    "description": "⚡ Kural tabanlı otomasyon ve scheduling",
+                },
+                {
+                    "name": "Market",
+                    "description": "💰 EPİAŞ elektrik piyasası fiyatları",
+                },
+                {
+                    "name": "Monitoring",
+                    "description": "🔔 Watchdog, Anomaly Detection ve bildirimler",
+                },
+                {
+                    "name": "Integrations",
+                    "description": "🔗 Üçüncü parti entegrasyonlar (Shelly Cloud, Tuya)",
+                },
+                {
+                    "name": "Wallet",
+                    "description": "💳 Sanal cüzdan ve enerji kredisi yönetimi",
+                },
+                {
+                    "name": "Firmware",
+                    "description": "📦 OTA firmware güncelleme yönetimi",
+                },
+                {
+                    "name": "Export",
+                    "description": "📤 Veri dışa aktarma (CSV, Excel, PDF)",
+                },
+            ],
         },
         
         # MQTT

@@ -70,6 +70,22 @@ def init_celery(app, celery_instance):
                 'task': 'app.tasks.integration_tasks.sync_all_integrations',
                 'schedule': 3600.0,
             },
+            # Watchdog - Cihaz sağlık kontrolü - Her 5 dakika
+            'watchdog-check-devices': {
+                'task': 'app.tasks.monitoring_tasks.check_device_health',
+                'schedule': 300.0,  # 5 dakika
+            },
+            # Anomaly Detection - Her 10 dakika
+            'anomaly-detection': {
+                'task': 'app.tasks.monitoring_tasks.check_anomalies',
+                'schedule': 600.0,  # 10 dakika
+            },
+            # AI sonuçlarını temizle - Her gece 04:00
+            'cleanup-ai-results': {
+                'task': 'app.tasks.ai_tasks.cleanup_old_ai_results',
+                'schedule': crontab(hour=4, minute=0),
+                'kwargs': {'days': 30},
+            },
         },
     )
 

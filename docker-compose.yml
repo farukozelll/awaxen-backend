@@ -192,7 +192,7 @@ services:
       context: .
       target: production
     container_name: awaxen_beat
-    command: celery -A app.celery_app beat --loglevel=${LOG_LEVEL:-info} --pidfile=/tmp/celerybeat.pid
+    command: celery -A app.celery_app beat --loglevel=${LOG_LEVEL:-info} --pidfile=/tmp/celerybeat.pid --schedule=/tmp/celerybeat-schedule
     environment:
       <<: *common-env
       C_FORCE_ROOT: "true"
@@ -327,7 +327,7 @@ services:
       WATCHTOWER_NOTIFICATION_URL: ${WATCHTOWER_NOTIFICATION_URL:-}
       WATCHTOWER_LABEL_ENABLE: "true"  # Sadece label'lı container'ları güncelle
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - //var/run/docker.sock:/var/run/docker.sock  # Windows Docker Desktop için
     restart: unless-stopped
     networks:
       - awaxen_net
@@ -344,13 +344,13 @@ services:
   minio:
     image: minio/minio:latest
     container_name: awaxen_minio
-    command: server /data --console-address ":9001"
+    command: server /data --console-address ":9002"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     ports:
       - "9000:9000"   # S3 API
-      - "9001:9001"   # Web Console
+      - "9002:9002"   # Web Console
     volumes:
       - minio_data:/data
     restart: unless-stopped

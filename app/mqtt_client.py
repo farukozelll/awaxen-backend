@@ -84,12 +84,49 @@ def _persist_telemetry(device: SmartDevice, data: dict[str, Any]):
     return telemetry
 
 
+def _check_realtime_anomaly(device: SmartDevice, power_w: float):
+    """
+    Real-time anomaly kontrolü.
+    Telemetri geldiğinde anında kontrol et ve bildirim oluştur.
+    """
+    try:
+        from app.services.anomaly_service import get_anomaly_detector, create_anomaly_notification
+        
+        detector = get_anomaly_detector()
+        anomaly = detector.check_power_anomaly(device.id, power_w)
+        
+        if anomaly:
+            # Yüksek seviye anomaliler için bildirim
+            if anomaly.get("severity") in ("high", "medium"):
+                anomaly["device_name"] = device.name
+                create_anomaly_notification(anomaly, device.organization_id)
+                db.session.commit()
+                logger.warning(f"[Anomaly] Real-time tespit: {device.name} - {anomaly['message']}")
+                
+                # Socket.IO ile anlık bildirim
+                if device.organization_id:
+                    from app.extensions import socketio
+                    room = f"org_{device.organization_id}"
+                    socketio.emit("anomaly_detected", {
+                        "device_id": str(device.id),
+                        "device_name": device.name,
+                        "type": anomaly.get("type"),
+                        "severity": anomaly.get("severity"),
+                        "message": anomaly.get("message"),
+                        "current_value": anomaly.get("current_value"),
+                        "expected_value": anomaly.get("expected_value"),
+                    }, room=room)
+    except Exception as e:
+        logger.debug(f"[Anomaly] Real-time kontrol hatası: {e}")
+
+
 def _handle_sensor_payload(app, payload: dict[str, Any], topic: str):
     """
     MQTT mesajını işle:
     1. Device'ı çözümle
     2. Telemetri kaydet
     3. Socket.IO ile canlı veri gönder
+    4. Real-time anomaly kontrolü
     """
     logger.debug(f"[MQTT] Payload alındı: {payload}")
     
@@ -117,6 +154,11 @@ def _handle_sensor_payload(app, payload: dict[str, Any], topic: str):
             logger.warning(f"Telemetri kaydedilemedi: {exc}")
             db.session.rollback()
             return
+        
+        # Real-time anomaly kontrolü
+        power_w = data.get("power") or data.get("power_w")
+        if power_w is not None:
+            _check_realtime_anomaly(device, float(power_w))
         
         # Socket.IO ile canlı veri gönder
         if device.organization_id:

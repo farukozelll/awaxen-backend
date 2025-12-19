@@ -28,31 +28,47 @@ ENABLE_SAHI = os.getenv("ENABLE_SAHI", "true").lower() == "true"
 
 
 def _load_yolo_model():
-    """YOLO modelini lazy-load et."""
+    """
+    YOLO modelini lazy-load et.
+    
+    Öncelik sırası:
+    1. ONNX modeli (production - hızlı, taşınabilir)
+    2. PT modeli (fallback)
+    3. Demo model (geliştirme)
+    """
     try:
         from ultralytics import YOLO
         
-        model_file = os.path.join(MODEL_PATH, "yolo11_solar_v1.pt")
+        # ONNX modeli öncelikli (production best practice)
+        onnx_model = os.path.join(MODEL_PATH, "yolo11_solar_v1.onnx")
+        pt_model = os.path.join(MODEL_PATH, "yolo11_solar_v1.pt")
         
-        # Model dosyası yoksa ONNX dene
-        if not os.path.exists(model_file):
-            model_file = os.path.join(MODEL_PATH, "yolo11_solar_v1.onnx")
+        model_file = None
         
-        if not os.path.exists(model_file):
-            logger.warning(f"[AI] Model dosyası bulunamadı: {model_file}")
-            # Demo için pretrained model kullan
-            model_file = "yolov8n.pt"
+        # 1. ONNX modeli kontrol et (öncelikli)
+        if os.path.exists(onnx_model):
+            model_file = onnx_model
+            logger.info(f"[AI] ONNX model bulundu: {onnx_model}")
+        # 2. PT modeli kontrol et
+        elif os.path.exists(pt_model):
+            model_file = pt_model
+            logger.info(f"[AI] PT model bulundu: {pt_model}")
+        # 3. Demo mod
+        else:
+            logger.warning(f"[AI] Model dosyası bulunamadı: {MODEL_PATH}")
             logger.info("[AI] Demo mod: yolov8n.pt kullanılıyor")
+            model_file = "yolov8n.pt"
         
         model = YOLO(model_file)
         logger.info(f"[AI] Model yüklendi: {model_file}")
-        return model
+        return model, model_file
+        
     except ImportError:
         logger.error("[AI] ultralytics kütüphanesi yüklü değil")
-        return None
+        return None, None
     except Exception as e:
         logger.error(f"[AI] Model yükleme hatası: {e}")
-        return None
+        return None, None
 
 
 def _run_sahi_inference(model, image_path: str, confidence: float) -> List[Dict]:
@@ -213,7 +229,7 @@ def process_ai_detection(self, task_id: str) -> Dict[str, Any]:
                 pass
             
             # YOLO modelini yükle
-            model = _load_yolo_model()
+            model, model_file = _load_yolo_model()
             if model is None:
                 raise Exception("YOLO model yüklenemedi")
             
@@ -239,10 +255,8 @@ def process_ai_detection(self, task_id: str) -> Dict[str, Any]:
             except Exception:
                 pass
             
-            # Sonuçları kaydet
-            model_version = getattr(model, 'model_name', 'yolo11_solar_v1')
-            if hasattr(model_version, '__str__'):
-                model_version = str(model_version).split('/')[-1].replace('.pt', '').replace('.onnx', '')
+            # Sonuçları kaydet - model versiyonunu dosya adından al
+            model_version = os.path.basename(model_file).replace('.pt', '').replace('.onnx', '') if model_file else 'unknown'
             
             for det in detections:
                 # Confidence threshold filtresi
