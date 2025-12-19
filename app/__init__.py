@@ -186,6 +186,7 @@ def create_app() -> Flask:
         SmartDevice, SmartAsset, DeviceTelemetry,
         MarketPrice, Automation, AutomationLog, Notification,
         VppRule, Wallet, WalletTransaction, AuditLog,
+        AIAnalysisTask, AIDetection,
     )
 
     # Create tables and seed data
