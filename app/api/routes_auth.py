@@ -337,3 +337,241 @@ def sync_user():
         db.session.rollback()
         current_app.logger.error(f"[AuthSync] Hata: {exc}")
         return jsonify({"error": "Sunucu hatası", "details": str(exc)}), 500
+
+
+# ==========================================
+# Telegram Endpoints
+# ==========================================
+
+@api_bp.route('/users/me/telegram', methods=['GET', 'OPTIONS'])
+@requires_auth
+def get_telegram_status():
+    """
+    Kullanıcının Telegram bağlantı durumunu getir.
+    ---
+    tags:
+      - Telegram
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Telegram durumu
+        schema:
+          type: object
+          properties:
+            connected:
+              type: boolean
+            chat_id:
+              type: string
+            username:
+              type: string
+      401:
+        description: Yetkisiz erişim
+    """
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    return jsonify({
+        "connected": bool(user.telegram_chat_id),
+        "chat_id": user.telegram_chat_id,
+        "username": user.telegram_username,
+    })
+
+
+@api_bp.route('/users/me/telegram', methods=['POST', 'OPTIONS'])
+@requires_auth
+def link_telegram():
+    """
+    Telegram hesabını bağla.
+    ---
+    tags:
+      - Telegram
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        schema:
+          type: object
+          properties:
+            chat_id:
+              type: string
+            username:
+              type: string
+    responses:
+      200:
+        description: Telegram bağlandı
+      401:
+        description: Yetkisiz erişim
+    """
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    data = request.get_json(silent=True) or {}
+    chat_id = data.get("chat_id")
+    username = data.get("username")
+    
+    if chat_id:
+        user.telegram_chat_id = str(chat_id)
+    if username:
+        user.telegram_username = username.lstrip("@") if username else None
+    
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Telegram bağlandı",
+        "connected": bool(user.telegram_chat_id),
+        "chat_id": user.telegram_chat_id,
+        "username": user.telegram_username,
+    })
+
+
+@api_bp.route('/users/me/telegram', methods=['DELETE', 'OPTIONS'])
+@requires_auth
+def unlink_telegram():
+    """
+    Telegram bağlantısını kaldır.
+    ---
+    tags:
+      - Telegram
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Telegram bağlantısı kaldırıldı
+      401:
+        description: Yetkisiz erişim
+    """
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    user.telegram_chat_id = None
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Telegram bağlantısı kaldırıldı",
+        "connected": False,
+    })
+
+
+@api_bp.route('/users/me/telegram/alerts', methods=['GET', 'OPTIONS'])
+@requires_auth
+def get_telegram_alerts():
+    """
+    Telegram bildirim ayarlarını getir.
+    ---
+    tags:
+      - Telegram
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Bildirim ayarları
+    """
+    from app.models import UserSettings
+    
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    settings = UserSettings.get_or_create(user.id)
+    
+    return jsonify({
+        "telegram_enabled": settings.telegram_enabled,
+        "device_alerts": settings.device_alerts,
+        "price_alerts": settings.price_alerts,
+        "automation_alerts": settings.automation_alerts,
+        "security_alerts": settings.security_alerts,
+    })
+
+
+@api_bp.route('/users/me/telegram/alerts', methods=['PATCH', 'OPTIONS'])
+@requires_auth
+def update_telegram_alerts():
+    """
+    Telegram bildirim ayarlarını güncelle.
+    ---
+    tags:
+      - Telegram
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        schema:
+          type: object
+          properties:
+            telegram_enabled:
+              type: boolean
+            device_alerts:
+              type: boolean
+            price_alerts:
+              type: boolean
+            automation_alerts:
+              type: boolean
+            security_alerts:
+              type: boolean
+    responses:
+      200:
+        description: Ayarlar güncellendi
+    """
+    from app.models import UserSettings
+    
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    settings = UserSettings.get_or_create(user.id)
+    data = request.get_json(silent=True) or {}
+    
+    allowed_fields = ['telegram_enabled', 'device_alerts', 'price_alerts', 
+                      'automation_alerts', 'security_alerts']
+    
+    for field in allowed_fields:
+        if field in data:
+            setattr(settings, field, bool(data[field]))
+    
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Ayarlar güncellendi",
+        "telegram_enabled": settings.telegram_enabled,
+        "device_alerts": settings.device_alerts,
+        "price_alerts": settings.price_alerts,
+        "automation_alerts": settings.automation_alerts,
+        "security_alerts": settings.security_alerts,
+    })
+
+
+@api_bp.route('/users/me/telegram/settings', methods=['GET', 'OPTIONS'])
+@requires_auth
+def get_telegram_settings():
+    """
+    Telegram genel ayarlarını getir.
+    ---
+    tags:
+      - Telegram
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Telegram ayarları
+    """
+    from app.models import UserSettings
+    
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    settings = UserSettings.get_or_create(user.id)
+    
+    return jsonify({
+        "connected": bool(user.telegram_chat_id),
+        "chat_id": user.telegram_chat_id,
+        "username": user.telegram_username,
+        "telegram_enabled": settings.telegram_enabled,
+        "language": settings.language,
+    })

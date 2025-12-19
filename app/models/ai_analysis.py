@@ -63,9 +63,16 @@ class AIAnalysisTask(db.Model, TimestampMixin):
     
     # Görüntü bilgileri
     original_image_key = Column(String(512), nullable=False)  # MinIO object key
+    annotated_image_key = Column(String(512), nullable=True)  # İşaretli görsel MinIO key
     original_filename = Column(String(255), nullable=True)
     image_width = Column(Integer, nullable=True)
     image_height = Column(Integer, nullable=True)
+    
+    # Görsel metadata
+    image_format = Column(String(20), nullable=True)  # jpg, png, tiff, etc.
+    image_size_bytes = Column(Integer, nullable=True)
+    test_type = Column(String(50), nullable=True)  # electroluminescence, thermal, visual
+    notes = Column(Text, nullable=True)  # Kullanıcı notları
     
     # Model bilgileri
     model_version = Column(String(50), nullable=True)  # örn: "yolo11_solar_v1"
@@ -114,6 +121,10 @@ class AIAnalysisTask(db.Model, TimestampMixin):
             "original_filename": self.original_filename,
             "image_width": self.image_width,
             "image_height": self.image_height,
+            "image_format": self.image_format,
+            "image_size_bytes": self.image_size_bytes,
+            "test_type": self.test_type,
+            "notes": self.notes,
             "model_version": self.model_version,
             "sahi_enabled": self.sahi_enabled,
             "confidence_threshold": self.confidence_threshold,
@@ -121,6 +132,7 @@ class AIAnalysisTask(db.Model, TimestampMixin):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "has_annotated_image": bool(self.annotated_image_key),
         }
         
         if include_detections and self.status == AITaskStatus.COMPLETED:

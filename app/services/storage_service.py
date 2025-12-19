@@ -29,15 +29,19 @@ class StorageService:
         secret_key: Optional[str] = None,
         bucket: Optional[str] = None,
         secure: bool = False,
+        public_endpoint: Optional[str] = None,
     ):
         self.endpoint = endpoint or os.getenv("MINIO_ENDPOINT", "localhost:9000")
         self.access_key = access_key or os.getenv("MINIO_ACCESS_KEY", "minioadmin")
         self.secret_key = secret_key or os.getenv("MINIO_SECRET_KEY", "minioadmin123")
         self.bucket = bucket or os.getenv("MINIO_BUCKET", "awaxen-images")
         self.secure = secure or os.getenv("MINIO_SECURE", "false").lower() == "true"
+        # Public endpoint for browser access (frontend)
+        self.public_endpoint = public_endpoint or os.getenv("MINIO_PUBLIC_ENDPOINT", "localhost:9000")
 
         protocol = "https" if self.secure else "http"
         self.endpoint_url = f"{protocol}://{self.endpoint}"
+        self.public_endpoint_url = f"{protocol}://{self.public_endpoint}"
 
         self._client: Optional[boto3.client] = None
 
@@ -138,6 +142,7 @@ class StorageService:
         object_key: str,
         expires_in: int = 3600,
         method: str = "get_object",
+        use_public_endpoint: bool = True,
     ) -> str:
         """
         Presigned URL oluştur (geçici erişim linki).
@@ -146,6 +151,7 @@ class StorageService:
             object_key: Dosya path'i
             expires_in: Geçerlilik süresi (saniye)
             method: get_object veya put_object
+            use_public_endpoint: True ise public endpoint kullan (frontend için)
 
         Returns:
             Presigned URL
@@ -156,6 +162,9 @@ class StorageService:
                 Params={"Bucket": self.bucket, "Key": object_key},
                 ExpiresIn=expires_in,
             )
+            # Replace internal endpoint with public endpoint for browser access
+            if use_public_endpoint and self.endpoint != self.public_endpoint:
+                url = url.replace(self.endpoint_url, self.public_endpoint_url)
             return url
         except Exception as e:
             logger.error(f"[Storage] Presigned URL hatası: {e}")

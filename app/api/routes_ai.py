@@ -132,6 +132,21 @@ Yüklenen görüntüde YOLO + SAM2 modelleri ile güneş paneli hatalarını tes
             "required": False,
             "description": "Güven eşiği (0.0-1.0, varsayılan: 0.40)",
         },
+        {
+            "name": "test_type",
+            "in": "formData",
+            "type": "string",
+            "required": False,
+            "enum": ["electroluminescence", "thermal", "visual", "infrared"],
+            "description": "Test türü (EL, termal, görsel, kızılötesi)",
+        },
+        {
+            "name": "notes",
+            "in": "formData",
+            "type": "string",
+            "required": False,
+            "description": "Kullanıcı notları",
+        },
     ],
     "responses": {
         202: {
@@ -183,6 +198,8 @@ def create_detection_task():
     # Opsiyonel parametreler
     asset_id = request.form.get("asset_id")
     enable_sahi = request.form.get("enable_sahi", "false").lower() == "true"
+    test_type = request.form.get("test_type")  # electroluminescence, thermal, visual, infrared
+    notes = request.form.get("notes")
     
     try:
         confidence = float(request.form.get("confidence_threshold", "0.40"))
@@ -235,6 +252,10 @@ def create_detection_task():
             original_filename=filename,
             sahi_enabled=enable_sahi,
             confidence_threshold=confidence,
+            image_format=ext,
+            image_size_bytes=file_size,
+            test_type=test_type,
+            notes=notes,
         )
         db.session.add(task)
         db.session.commit()
@@ -305,14 +326,21 @@ def get_task_status(task_id: str):
     
     result = task.to_dict(include_detections=True)
     
-    # Tamamlandıysa presigned URL ekle
+    # Tamamlandıysa presigned URL'ler ekle
     if task.status == AITaskStatus.COMPLETED:
         try:
             storage = get_storage_service()
+            # Orijinal görsel URL
             result["image_url"] = storage.get_presigned_url(
                 task.original_image_key,
                 expires_in=3600,  # 1 saat
             )
+            # Annotated (işaretli) görsel URL
+            if task.annotated_image_key:
+                result["annotated_image_url"] = storage.get_presigned_url(
+                    task.annotated_image_key,
+                    expires_in=3600,
+                )
         except Exception:
             pass
     

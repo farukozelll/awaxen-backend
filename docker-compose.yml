@@ -319,6 +319,7 @@ services:
     image: containrrr/watchtower:latest
     container_name: awaxen_watchtower
     environment:
+      DOCKER_API_VERSION: "1.44"  # Docker Desktop API versiyonu
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_POLL_INTERVAL: 300  # 5 dakikada bir kontrol
       WATCHTOWER_INCLUDE_STOPPED: "false"
@@ -394,7 +395,7 @@ services:
       AI_CONFIDENCE_THRESHOLD: ${AI_CONFIDENCE_THRESHOLD:-0.40}
       ENABLE_SAHI: ${ENABLE_SAHI:-true}
     volumes:
-      - ai_models:/app/models
+      - ./ai_models:/app/models:ro  # ONNX modelleri için bind mount (read-only)
       - ai_cache:/root/.cache
     depends_on:
       redis:
@@ -433,8 +434,6 @@ volumes:
   pgadmin_data:
     driver: local
   minio_data:
-    driver: local
-  ai_models:
     driver: local
   ai_cache:
     driver: local

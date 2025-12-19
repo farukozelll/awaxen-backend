@@ -71,7 +71,7 @@ def _load_yolo_model():
         return None, None
 
 
-def _run_sahi_inference(model, image_path: str, confidence: float) -> List[Dict]:
+def _run_sahi_inference(model, model_path: str, image_path: str, confidence: float) -> List[Dict]:
     """
     SAHI ile yüksek çözünürlüklü görüntülerde inference.
     
@@ -82,10 +82,10 @@ def _run_sahi_inference(model, image_path: str, confidence: float) -> List[Dict]
         from sahi import AutoDetectionModel
         from sahi.predict import get_sliced_prediction
         
-        # SAHI detection model wrapper
+        # SAHI detection model wrapper - YOLOv11 için yolov8 tipi kullanılır (aynı API)
         detection_model = AutoDetectionModel.from_pretrained(
             model_type="yolov8",
-            model_path=model.model_name if hasattr(model, 'model_name') else str(model),
+            model_path=model_path,  # Gerçek dosya yolu
             confidence_threshold=confidence,
             device="cpu",  # RPi uyumlu
         )
@@ -122,6 +122,89 @@ def _run_sahi_inference(model, image_path: str, confidence: float) -> List[Dict]
         return None
     except Exception as e:
         logger.warning(f"[AI] SAHI hatası: {e}, standart inference kullanılacak")
+        return None
+
+
+def _create_annotated_image(
+    image_path: str, 
+    detections: List[Dict], 
+    original_key: str,
+    storage
+) -> Optional[str]:
+    """
+    Tespit edilen hataları görsel üzerinde işaretle ve MinIO'ya yükle.
+    
+    Args:
+        image_path: Orijinal görsel dosya yolu
+        detections: Tespit listesi
+        original_key: Orijinal MinIO key
+        storage: Storage service instance
+    
+    Returns:
+        Annotated image MinIO key veya None
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        
+        # Görseli aç
+        img = Image.open(image_path)
+        draw = ImageDraw.Draw(img)
+        
+        # Renk paleti (hata türüne göre)
+        colors = {
+            "hotspot": "#FF0000",      # Kırmızı
+            "crack": "#FF6600",        # Turuncu
+            "soiling": "#FFCC00",      # Sarı
+            "shading": "#9900FF",      # Mor
+            "delamination": "#0066FF", # Mavi
+            "snail_trail": "#00CC00",  # Yeşil
+            "unknown": "#FF00FF",      # Magenta
+        }
+        
+        # Her tespit için bbox çiz
+        for det in detections:
+            bbox = det.get("bbox", [])
+            if len(bbox) >= 4:
+                x, y, w, h = bbox[0], bbox[1], bbox[2], bbox[3]
+                defect_class = det.get("class", "unknown")
+                confidence = det.get("confidence", 0)
+                
+                color = colors.get(defect_class, "#FF00FF")
+                
+                # Dikdörtgen çiz
+                draw.rectangle(
+                    [(x, y), (x + w, y + h)],
+                    outline=color,
+                    width=3
+                )
+                
+                # Label ekle
+                label = f"{defect_class}: {confidence:.0%}"
+                try:
+                    # Varsayılan font
+                    draw.text((x, y - 20), label, fill=color)
+                except Exception:
+                    draw.text((x, y - 15), label, fill=color)
+        
+        # Annotated image'ı kaydet
+        import io
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=90)
+        buffer.seek(0)
+        
+        # MinIO'ya yükle
+        annotated_key = original_key.replace("ai-uploads/", "ai-annotated/")
+        storage.client.upload_fileobj(
+            buffer,
+            storage.bucket,
+            annotated_key,
+            ExtraArgs={"ContentType": "image/jpeg"}
+        )
+        
+        return annotated_key
+        
+    except Exception as e:
+        logger.warning(f"[AI] Annotated image hatası: {e}")
         return None
 
 
@@ -241,12 +324,27 @@ def process_ai_detection(self, task_id: str) -> Dict[str, Any]:
             
             detections = None
             if task.sahi_enabled and ENABLE_SAHI:
-                detections = _run_sahi_inference(model, tmp_path, confidence)
+                detections = _run_sahi_inference(model, model_file, tmp_path, confidence)
             
             if detections is None:
                 detections = _run_standard_inference(model, tmp_path, confidence)
             
             task.progress = 80
+            db.session.commit()
+            
+            # Annotated image oluştur ve MinIO'ya yükle
+            annotated_key = None
+            try:
+                annotated_key = _create_annotated_image(
+                    tmp_path, detections, task.original_image_key, storage
+                )
+                if annotated_key:
+                    task.annotated_image_key = annotated_key
+                    logger.info(f"[AI] Annotated image oluşturuldu: {annotated_key}")
+            except Exception as e:
+                logger.warning(f"[AI] Annotated image oluşturulamadı: {e}")
+            
+            task.progress = 90
             db.session.commit()
             
             # Geçici dosyayı sil
