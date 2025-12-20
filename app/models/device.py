@@ -47,6 +47,9 @@ class SmartDevice(db.Model):
     model = db.Column(db.String(50))
     device_type = db.Column(db.String(50), index=True)  # relay, energy_meter, sensor, switch, plug, dimmer
     
+    # Power rating for savings calculation (Watt)
+    power_rating_watt = db.Column(db.Integer, default=0)
+    
     is_sensor = db.Column(db.Boolean, default=False)
     is_actuator = db.Column(db.Boolean, default=False)
     
@@ -75,6 +78,7 @@ class SmartDevice(db.Model):
             "brand": self.brand,
             "model": self.model,
             "device_type": self.device_type,
+            "power_rating_watt": self.power_rating_watt,
             "is_sensor": self.is_sensor,
             "is_actuator": self.is_actuator,
             "is_online": self.is_online,

@@ -44,6 +44,9 @@ from .storage_service import StorageService, get_storage_service
 from .watchdog_service import WatchdogService, get_watchdog_service
 from .anomaly_service import AnomalyDetector, get_anomaly_detector
 
+# Savings
+from .savings_service import SavingsService
+
 __all__ = [
     # v6.0 Core
     "ShellyService",
@@ -81,4 +84,6 @@ __all__ = [
     "get_watchdog_service",
     "AnomalyDetector",
     "get_anomaly_detector",
+    # Savings
+    "SavingsService",
 ]

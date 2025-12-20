@@ -39,6 +39,11 @@ class Organization(db.Model):
     subscription_plan = db.Column(db.String(50), default="free")
     
     settings = db.Column(JSONB, default=dict)
+    
+    # Electricity pricing for savings calculation (TL/kWh)
+    electricity_price_kwh = db.Column(db.Numeric(10, 4), default=2.5)
+    currency = db.Column(db.String(10), default="TRY")
+    
     is_active = db.Column(db.Boolean, default=True, index=True)
     
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
@@ -76,6 +81,8 @@ class Organization(db.Model):
             "location": self.location or {},
             "subscription_status": self.subscription_status,
             "subscription_plan": self.subscription_plan,
+            "electricity_price_kwh": float(self.electricity_price_kwh) if self.electricity_price_kwh else 2.5,
+            "currency": self.currency,
             "is_active": self.is_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

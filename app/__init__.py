@@ -285,6 +285,7 @@ Tüm liste endpoint'leri pagination destekler:
         MarketPrice, Automation, AutomationLog, Notification,
         VppRule, Wallet, WalletTransaction, AuditLog,
         AIAnalysisTask, AIDetection,
+        EnergySavings, DeviceStateLog,
     )
 
     # Create tables and seed data

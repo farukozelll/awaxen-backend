@@ -114,7 +114,7 @@ services:
       context: .
       target: production
     container_name: awaxen_backend
-    command: gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 2 --worker-class gevent --timeout 120 --keep-alive 5 --access-logfile - --error-logfile - run:app
+    command: gunicorn --bind 0.0.0.0:5000 --workers 1 --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --timeout 120 --keep-alive 5 --access-logfile - --error-logfile - run:app
     ports:
       - "5000:5000"
     environment:
@@ -419,6 +419,46 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
+  # ==========================================
+  # 13. HOME ASSISTANT (Universal IoT Adapter)
+  # ==========================================
+  # Home Assistant acts as a universal adapter for all IoT devices.
+  # It connects to devices (Shelly, Tapo, Tuya, Philips Hue, etc.)
+  # and sends standardized data to Awaxen via MQTT.
+  #
+  # Setup Steps:
+  # 1. Access HA at http://localhost:8123
+  # 2. Create account and complete onboarding
+  # 3. Go to Settings -> Devices & Services -> Add Integration -> MQTT
+  # 4. Configure MQTT broker: mqtt (or awaxen_mqtt), port 1883
+  # 5. Add MQTT Statestream to configuration.yaml (see homeassistant/configuration.yaml)
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: awaxen_homeassistant
+    environment:
+      TZ: Europe/Istanbul
+    ports:
+      - "8123:8123"
+    volumes:
+      - homeassistant_config:/config
+      - ./homeassistant:/config/custom_config:ro
+    depends_on:
+      - mqtt
+    restart: unless-stopped
+    networks:
+      - awaxen_net
+    privileged: true
+    profiles:
+      - homeassistant
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
 # ==========================================
 # VOLUMES
 # ==========================================
@@ -436,6 +476,8 @@ volumes:
   minio_data:
     driver: local
   ai_cache:
+    driver: local
+  homeassistant_config:
     driver: local
 
 # ==========================================

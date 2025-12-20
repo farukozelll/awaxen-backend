@@ -14,6 +14,7 @@ from app.models import (
     SmartAsset, SmartDevice, DeviceTelemetry
 )
 from app.services.shelly_service import get_shelly_service
+from app.services.savings_service import SavingsService
 
 logger = logging.getLogger(__name__)
 
@@ -86,17 +87,44 @@ class AutomationEngine:
             return False
         
         try:
+            success = False
+            
             if action_type == 'turn_on':
-                return self._control_device(device, 'on')
+                success = self._control_device(device, 'on')
+                # Record state change for savings calculation
+                if success:
+                    SavingsService.record_device_state_change(
+                        device_id=str(device.id),
+                        new_state='on',
+                        triggered_by='automation',
+                        automation_id=str(automation.id)
+                    )
             elif action_type == 'turn_off':
-                return self._control_device(device, 'off')
+                success = self._control_device(device, 'off')
+                # Record state change for savings calculation
+                if success:
+                    SavingsService.record_device_state_change(
+                        device_id=str(device.id),
+                        new_state='off',
+                        triggered_by='automation',
+                        automation_id=str(automation.id)
+                    )
             elif action_type == 'toggle':
-                return self._control_device(device, 'toggle')
+                success = self._control_device(device, 'toggle')
             elif action_type == 'set_power':
                 power_level = action.get('value', 100)
-                return self._set_power(device, power_level)
+                success = self._set_power(device, power_level)
+                # Record dimmed state for partial savings
+                if success and power_level < 100:
+                    SavingsService.record_device_state_change(
+                        device_id=str(device.id),
+                        new_state='dimmed',
+                        power_level=power_level,
+                        triggered_by='automation',
+                        automation_id=str(automation.id)
+                    )
             
-            return False
+            return success
             
         except Exception as e:
             logger.exception(f"Automation execution error: {e}")

@@ -207,18 +207,267 @@ def _on_connect(client: mqtt.Client, userdata, flags, reason_code):
     logger.info(f"[MQTT] Subscribe: topic={topic}, result={result}")
 
 
+def _parse_homeassistant_topic(topic: str, payload_text: str) -> Optional[dict[str, Any]]:
+    """
+    Home Assistant mqtt_statestream topic formatını parse et.
+    
+    Topic format: awaxen/sensors/<domain>/<entity_id>/<attribute>
+    Örnek: awaxen/sensors/switch/tapo_priz_103/state -> ON
+           awaxen/sensors/sensor/tapo_priz_103_current_consumption/state -> 45.5
+    
+    Returns:
+        Parsed payload dict veya None
+    """
+    parts = topic.split('/')
+    
+    # awaxen/sensors/<domain>/<entity_id>/<attribute> formatı
+    if len(parts) >= 5 and parts[0] == 'awaxen' and parts[1] == 'sensors':
+        domain = parts[2]      # switch, sensor, light, etc.
+        entity_id = parts[3]   # tapo_priz_103 veya tapo_priz_103_current_consumption
+        attribute = parts[4]   # state, attributes, etc.
+        
+        # Entity ID'den cihaz adını ve metrik tipini ayıkla
+        # Örn: tapo_priz_103_current_consumption -> device: tapo_priz_103, metric: current_consumption
+        device_name = entity_id
+        metric = None
+        
+        # Bilinen metrik suffix'leri
+        metric_suffixes = [
+            '_current_consumption', '_today_energy', '_power', '_energy',
+            '_voltage', '_current', '_temperature', '_humidity',
+            '_total_energy', '_daily_energy'
+        ]
+        
+        for suffix in metric_suffixes:
+            if entity_id.endswith(suffix):
+                device_name = entity_id[:-len(suffix)]
+                metric = suffix[1:]  # Remove leading underscore
+                break
+        
+        # Değeri parse et
+        value = payload_text.strip()
+        
+        # Sayısal değer mi kontrol et
+        numeric_value = None
+        try:
+            numeric_value = float(value)
+        except (ValueError, TypeError):
+            pass
+        
+        # Payload oluştur
+        payload = {
+            "external_id": f"{domain}.{entity_id}",  # HA entity_id formatı
+            "device_name": device_name,
+            "domain": domain,
+            "attribute": attribute,
+            "ha_entity_id": entity_id,
+        }
+        
+        # Switch durumu (ON/OFF)
+        if domain == 'switch' and attribute == 'state':
+            payload["state"] = value.upper()
+            payload["is_on"] = value.upper() == 'ON'
+        
+        # Sensor değerleri
+        elif domain == 'sensor' and numeric_value is not None:
+            payload["value"] = numeric_value
+            
+            # Metrik tipine göre alan adı belirle
+            if metric:
+                if 'power' in metric or 'consumption' in metric:
+                    payload["power"] = numeric_value
+                    payload["power_w"] = numeric_value
+                elif 'energy' in metric:
+                    payload["energy"] = numeric_value
+                    payload["energy_total_kwh"] = numeric_value
+                elif 'voltage' in metric:
+                    payload["voltage"] = numeric_value
+                elif 'current' in metric and 'consumption' not in metric:
+                    payload["current"] = numeric_value
+                elif 'temperature' in metric:
+                    payload["temperature"] = numeric_value
+                elif 'humidity' in metric:
+                    payload["humidity"] = numeric_value
+        
+        # Light durumu
+        elif domain == 'light' and attribute == 'state':
+            payload["state"] = value.upper()
+            payload["is_on"] = value.upper() == 'ON'
+        
+        # Binary sensor
+        elif domain == 'binary_sensor' and attribute == 'state':
+            payload["state"] = value.lower()
+            payload["is_on"] = value.lower() in ('on', 'true', '1')
+        
+        return payload
+    
+    return None
+
+
+def _resolve_device_by_ha_entity(entity_id: str, device_name: str) -> Optional[SmartDevice]:
+    """
+    Home Assistant entity_id veya device_name ile cihaz bul.
+    Önce external_id ile, sonra isim benzerliği ile arar.
+    """
+    # 1. Tam external_id eşleşmesi (switch.tapo_priz_103)
+    device = SmartDevice.query.filter_by(external_id=entity_id).first()
+    if device:
+        return device
+    
+    # 2. Entity ID'nin son kısmı ile ara (tapo_priz_103)
+    short_id = entity_id.split('.')[-1] if '.' in entity_id else entity_id
+    device = SmartDevice.query.filter_by(external_id=short_id).first()
+    if device:
+        return device
+    
+    # 3. Device name ile ara
+    device = SmartDevice.query.filter_by(external_id=device_name).first()
+    if device:
+        return device
+    
+    # 4. İsim benzerliği ile ara (LIKE query)
+    device = SmartDevice.query.filter(
+        SmartDevice.external_id.ilike(f"%{device_name}%")
+    ).first()
+    if device:
+        return device
+    
+    # 5. Name alanında ara
+    device = SmartDevice.query.filter(
+        SmartDevice.name.ilike(f"%{device_name}%")
+    ).first()
+    
+    return device
+
+
+def _handle_homeassistant_message(app, ha_payload: dict[str, Any], topic: str):
+    """
+    Home Assistant formatındaki MQTT mesajını işle.
+    """
+    entity_id = ha_payload.get("external_id", "")
+    device_name = ha_payload.get("device_name", "")
+    domain = ha_payload.get("domain", "")
+    
+    logger.info(f"[MQTT-HA] Mesaj: entity={entity_id}, domain={domain}, data={ha_payload}")
+    
+    # Cihazı bul
+    device = _resolve_device_by_ha_entity(entity_id, device_name)
+    
+    if not device:
+        logger.debug(f"[MQTT-HA] Cihaz bulunamadı: {entity_id} / {device_name}")
+        # Cihaz bulunamadı ama yine de Frontend'e gönder (keşif için)
+        socketio.emit(
+            "ha_device_update",
+            {
+                "entity_id": entity_id,
+                "device_name": device_name,
+                "domain": domain,
+                "data": ha_payload,
+                "timestamp": datetime.utcnow().isoformat(),
+                "registered": False,
+            },
+            namespace="/",
+        )
+        return
+    
+    # Cihaz durumunu güncelle
+    device.is_online = True
+    device.last_seen = datetime.utcnow()
+    
+    # State değişikliği varsa kaydet (savings için)
+    if "state" in ha_payload and domain in ('switch', 'light'):
+        new_state = 'on' if ha_payload.get("is_on") else 'off'
+        try:
+            from app.services.savings_service import SavingsService
+            SavingsService.record_device_state_change(
+                device_id=str(device.id),
+                new_state=new_state,
+                triggered_by="homeassistant"
+            )
+        except Exception as e:
+            logger.debug(f"[MQTT-HA] Savings kaydedilemedi: {e}")
+    
+    # Telemetri verisi varsa kaydet
+    if any(k in ha_payload for k in ('power', 'power_w', 'energy', 'voltage', 'current', 'temperature', 'humidity')):
+        try:
+            telemetry = _persist_telemetry(device, ha_payload)
+            logger.info(f"[MQTT-HA] Telemetri kaydedildi: {device.name}")
+        except Exception as e:
+            logger.warning(f"[MQTT-HA] Telemetri kaydedilemedi: {e}")
+            db.session.rollback()
+    else:
+        db.session.commit()
+    
+    # Socket.IO ile Frontend'e gönder
+    if device.organization_id:
+        room = f"org_{device.organization_id}"
+        
+        # Telemetri event'i
+        socketio.emit(
+            "telemetry",
+            {
+                "device_id": str(device.id),
+                "external_id": device.external_id,
+                "name": device.name,
+                "data": ha_payload,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+            room=room,
+        )
+        
+        # Device update event'i (state değişiklikleri için)
+        if "state" in ha_payload:
+            socketio.emit(
+                "device_status",
+                {
+                    "device_id": str(device.id),
+                    "external_id": device.external_id,
+                    "name": device.name,
+                    "is_online": True,
+                    "is_on": ha_payload.get("is_on"),
+                    "state": ha_payload.get("state"),
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+                room=room,
+            )
+    
+    # Global broadcast (tüm bağlı client'lara)
+    socketio.emit(
+        "device_update",
+        {
+            "device_id": str(device.id) if device else None,
+            "entity_id": entity_id,
+            "device_name": device.name if device else device_name,
+            "domain": domain,
+            "data": ha_payload,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+        namespace="/",
+    )
+
+
 def _on_message(client: mqtt.Client, userdata, message):
     app = userdata["app"]
     payload_text = message.payload.decode("utf-8", errors="ignore")
-    logger.debug(f"[MQTT] Mesaj: topic={message.topic}")
-
-    try:
-        payload = json.loads(payload_text)
-    except json.JSONDecodeError:
-        payload = {"raw": payload_text}
+    topic = message.topic
+    
+    logger.debug(f"[MQTT] Mesaj: topic={topic}, payload={payload_text[:100]}")
 
     with app.app_context():
-        _handle_sensor_payload(app, payload, message.topic)
+        # Home Assistant mqtt_statestream formatını kontrol et
+        ha_payload = _parse_homeassistant_topic(topic, payload_text)
+        
+        if ha_payload:
+            # Home Assistant formatı
+            _handle_homeassistant_message(app, ha_payload, topic)
+        else:
+            # Standart JSON format (Shelly, vb.)
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError:
+                payload = {"raw": payload_text}
+            
+            _handle_sensor_payload(app, payload, topic)
 
 
 def _sanitize_broker_url(raw: str) -> str:

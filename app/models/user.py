@@ -117,6 +117,8 @@ class UserSettings(db.Model):
     # UI Tercihleri
     language = db.Column(db.String(10), default="tr")
     theme = db.Column(db.String(20), default="system")
+    primary_color = db.Column(db.String(20), default="#3B82F6")  # Tailwind blue-500
+    secondary_color = db.Column(db.String(20), default="#10B981")  # Tailwind emerald-500
     dashboard_layout = db.Column(JSONB, default=dict)
     
     # Fiyat Uyarı Eşikleri
@@ -140,6 +142,8 @@ class UserSettings(db.Model):
             "weekly_report": self.weekly_report,
             "language": self.language,
             "theme": self.theme,
+            "primary_color": self.primary_color,
+            "secondary_color": self.secondary_color,
             "price_alert_threshold_low": float(self.price_alert_threshold_low) if self.price_alert_threshold_low else None,
             "price_alert_threshold_high": float(self.price_alert_threshold_high) if self.price_alert_threshold_high else None,
         }

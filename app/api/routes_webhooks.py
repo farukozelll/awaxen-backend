@@ -21,8 +21,9 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models import User, SmartDevice, Wallet, Automation, MarketPrice, DeviceTelemetry
+from app.models import User, SmartDevice, Wallet, Automation, MarketPrice, DeviceTelemetry, Organization
 from app.services import get_current_market_price
+from app.services.savings_service import SavingsService
 
 bp = Blueprint("webhooks", __name__)
 
@@ -923,3 +924,232 @@ def handle_notification_toggle(chat_id, user, data, token):
         db.session.commit()
     
     return handle_settings(chat_id, user, token)
+
+
+# ==========================================
+# HOME ASSISTANT WEBHOOK ENDPOINTS
+# ==========================================
+
+@bp.route("/homeassistant/device", methods=["POST"])
+def homeassistant_device_webhook():
+    """
+    Home Assistant'tan gelen cihaz durum güncellemelerini işle.
+    
+    Payload format:
+    {
+        "entity_id": "switch.tapo_plug_1",
+        "from_state": "off",
+        "to_state": "on",
+        "timestamp": "2024-01-15T10:30:00+03:00",
+        "attributes": {
+            "power": 150.5,
+            "energy": 12.34,
+            "friendly_name": "Tapo Plug 1"
+        }
+    }
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        
+        entity_id = data.get("entity_id")
+        from_state = data.get("from_state")
+        to_state = data.get("to_state")
+        attributes = data.get("attributes", {})
+        
+        if not entity_id:
+            return jsonify({"error": "entity_id required"}), 400
+        
+        current_app.logger.info(f"[HA Webhook] Device update: {entity_id} {from_state} -> {to_state}")
+        
+        # Find device by external_id (entity_id from HA)
+        device = SmartDevice.query.filter_by(external_id=entity_id).first()
+        
+        if not device:
+            # Try to find by name match
+            friendly_name = attributes.get("friendly_name", "")
+            if friendly_name:
+                device = SmartDevice.query.filter(
+                    SmartDevice.name.ilike(f"%{friendly_name}%")
+                ).first()
+        
+        if device:
+            # Update device online status
+            device.is_online = True
+            device.last_seen = datetime.now(timezone.utc)
+            
+            # Record state change for savings calculation
+            from app.services.savings_service import SavingsService
+            if to_state in ("on", "off"):
+                SavingsService.record_device_state_change(
+                    device_id=str(device.id),
+                    new_state=to_state,
+                    triggered_by="homeassistant"
+                )
+            
+            # Store telemetry if power/energy data available
+            power = attributes.get("power") or attributes.get("current_power_w")
+            energy = attributes.get("energy") or attributes.get("total_energy_kwh")
+            
+            if power is not None:
+                telemetry = DeviceTelemetry(
+                    time=datetime.now(timezone.utc),
+                    device_id=device.id,
+                    key="power_w",
+                    value=float(power)
+                )
+                db.session.add(telemetry)
+            
+            if energy is not None:
+                telemetry = DeviceTelemetry(
+                    time=datetime.now(timezone.utc),
+                    device_id=device.id,
+                    key="energy_total_kwh",
+                    value=float(energy)
+                )
+                db.session.add(telemetry)
+            
+            db.session.commit()
+            
+            return jsonify({
+                "status": "success",
+                "device_id": str(device.id),
+                "message": f"Device {device.name} updated"
+            }), 200
+        else:
+            current_app.logger.warning(f"[HA Webhook] Device not found: {entity_id}")
+            return jsonify({
+                "status": "ignored",
+                "message": f"Device {entity_id} not found in Awaxen"
+            }), 200
+            
+    except Exception as e:
+        current_app.logger.error(f"[HA Webhook] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/homeassistant/telemetry", methods=["POST"])
+def homeassistant_telemetry_webhook():
+    """
+    Home Assistant'tan gelen toplu telemetri verilerini işle.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        devices_data = data.get("devices", [])
+        
+        if not devices_data:
+            return jsonify({"error": "devices array required"}), 400
+        
+        processed = 0
+        
+        for device_data in devices_data:
+            entity_id = device_data.get("entity_id")
+            state = device_data.get("state")
+            
+            if not entity_id or state is None:
+                continue
+            
+            parts = entity_id.replace("sensor.", "").rsplit("_", 1)
+            if len(parts) < 2:
+                continue
+            
+            device_name = parts[0]
+            metric = parts[1]
+            
+            device = SmartDevice.query.filter(
+                SmartDevice.external_id.ilike(f"%{device_name}%")
+            ).first()
+            
+            if device:
+                key_map = {
+                    "power": "power_w",
+                    "energy": "energy_total_kwh",
+                    "temperature": "temperature_c",
+                    "humidity": "humidity_pct"
+                }
+                telemetry_key = key_map.get(metric, metric)
+                
+                try:
+                    telemetry = DeviceTelemetry(
+                        time=datetime.now(timezone.utc),
+                        device_id=device.id,
+                        key=telemetry_key,
+                        value=float(state)
+                    )
+                    db.session.add(telemetry)
+                    processed += 1
+                except (ValueError, TypeError):
+                    pass
+        
+        db.session.commit()
+        return jsonify({"status": "success", "processed": processed}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"[HA Telemetry] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/homeassistant/discovery", methods=["POST"])
+def homeassistant_discovery_webhook():
+    """
+    Home Assistant'tan gelen cihaz keşif bilgilerini işle.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        organization_id = data.get("organization_id")
+        devices_data = data.get("devices", [])
+        
+        if not organization_id:
+            return jsonify({"error": "organization_id required"}), 400
+        
+        from app.models import Organization
+        org = Organization.query.get(organization_id)
+        if not org:
+            return jsonify({"error": "Organization not found"}), 404
+        
+        created = 0
+        updated = 0
+        
+        for device_data in devices_data:
+            entity_id = device_data.get("entity_id")
+            friendly_name = device_data.get("friendly_name", entity_id)
+            device_class = device_data.get("device_class", "switch")
+            manufacturer = device_data.get("manufacturer", "unknown")
+            model = device_data.get("model", "")
+            
+            if not entity_id:
+                continue
+            
+            existing = SmartDevice.query.filter_by(
+                organization_id=organization_id,
+                external_id=entity_id
+            ).first()
+            
+            if existing:
+                existing.name = friendly_name
+                existing.model = model
+                existing.is_online = True
+                existing.last_seen = datetime.now(timezone.utc)
+                updated += 1
+            else:
+                new_device = SmartDevice(
+                    organization_id=organization_id,
+                    external_id=entity_id,
+                    name=friendly_name,
+                    brand=manufacturer.lower() if manufacturer else "homeassistant",
+                    model=model,
+                    device_type=device_class,
+                    is_sensor=device_class in ("sensor", "binary_sensor"),
+                    is_actuator=device_class in ("switch", "light", "climate", "cover"),
+                    is_online=True,
+                    last_seen=datetime.now(timezone.utc),
+                    is_active=True
+                )
+                db.session.add(new_device)
+                created += 1
+        
+        db.session.commit()
+        return jsonify({"status": "success", "created": created, "updated": updated}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"[HA Discovery] Error: {e}")
+        return jsonify({"error": str(e)}), 500

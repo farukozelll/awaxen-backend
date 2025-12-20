@@ -21,6 +21,7 @@ from app.models.billing import SubscriptionPlan, Subscription, Invoice, PaymentM
 from app.models.firmware import Firmware, FirmwareUpdate
 from app.models.export import DataExport
 from app.models.ai_analysis import AIAnalysisTask, AIDetection, AITaskStatus, DefectType
+from app.models.savings import EnergySavings, DeviceStateLog
 from app.models.enums import (
     OrganizationType,
     DeviceStatus,
@@ -88,4 +89,7 @@ __all__ = [
     "AIDetection",
     "AITaskStatus",
     "DefectType",
+    # Savings
+    "EnergySavings",
+    "DeviceStateLog",
 ]

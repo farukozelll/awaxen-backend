@@ -1,0 +1,153 @@
+# ============================================
+# Home Assistant Configuration for Awaxen Integration
+# ============================================
+#
+# Bu dosyayı Home Assistant'ın config klasörüne kopyalayın
+# veya mevcut configuration.yaml dosyanıza ekleyin.
+#
+# Kurulum Adımları:
+# 1. Home Assistant'a giriş yapın (http://localhost:8123)
+# 2. Settings -> Devices & Services -> Add Integration -> MQTT
+# 3. MQTT Broker bilgileri:
+#    - Broker: mqtt (Docker network içinde) veya localhost
+#    - Port: 1883
+#    - Username: (MQTT_USERNAME env değişkeni)
+#    - Password: (MQTT_PASSWORD env değişkeni)
+# 4. Bu dosyadaki ayarları configuration.yaml'a ekleyin
+# 5. Home Assistant'ı yeniden başlatın
+
+# ==========================================
+# MQTT Statestream - Awaxen'e Veri Gönderimi
+# ==========================================
+# Bu ayar, Home Assistant'taki tüm entity durumlarını
+# MQTT üzerinden Awaxen Backend'e gönderir.
+
+mqtt_statestream:
+  base_topic: awaxen
+  publish_attributes: true
+  publish_timestamps: true
+  include:
+    domains:
+      - sensor
+      - switch
+      - light
+      - climate
+      - binary_sensor
+      - cover
+    entity_globs:
+      - sensor.*_power
+      - sensor.*_energy
+      - sensor.*_temperature
+      - sensor.*_humidity
+      - switch.*
+      - light.*
+
+# ==========================================
+# MQTT Event Stream (Opsiyonel)
+# ==========================================
+# Olayları da MQTT'ye göndermek için
+
+mqtt_eventstream:
+  publish_topic: awaxen/events
+  subscribe_topic: awaxen/commands
+
+# ==========================================
+# Recorder - Veritabanı Ayarları
+# ==========================================
+# Home Assistant'ın kendi veritabanı ayarları
+# Awaxen zaten TimescaleDB kullandığı için HA'da
+# uzun süreli veri tutmaya gerek yok.
+
+recorder:
+  purge_keep_days: 7
+  commit_interval: 5
+  include:
+    domains:
+      - sensor
+      - switch
+      - light
+      - climate
+
+# ==========================================
+# Logger - Hata Ayıklama
+# ==========================================
+
+logger:
+  default: info
+  logs:
+    homeassistant.components.mqtt: debug
+
+# ==========================================
+# Automation Örneği - Awaxen'e Bildirim
+# ==========================================
+# Bu otomasyon, bir cihaz durumu değiştiğinde
+# Awaxen'e MQTT mesajı gönderir.
+
+automation:
+  - alias: "Awaxen - Device State Change Notification"
+    trigger:
+      - platform: state
+        entity_id:
+          - switch.tapo_plug_1
+          - switch.shelly_plug_s
+          - light.living_room
+    action:
+      - service: mqtt.publish
+        data:
+          topic: "awaxen/device_events"
+          payload_template: >
+            {
+              "entity_id": "{{ trigger.entity_id }}",
+              "from_state": "{{ trigger.from_state.state }}",
+              "to_state": "{{ trigger.to_state.state }}",
+              "timestamp": "{{ now().isoformat() }}",
+              "attributes": {{ trigger.to_state.attributes | tojson }}
+            }
+          retain: false
+
+# ==========================================
+# REST Command - Awaxen API Çağrısı
+# ==========================================
+# Home Assistant'tan Awaxen API'ına istek göndermek için
+
+rest_command:
+  awaxen_device_update:
+    url: "http://backend:5000/api/webhooks/homeassistant/device"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+      Authorization: "Bearer {{ states('input_text.awaxen_api_token') }}"
+    payload: '{{ payload }}'
+
+# ==========================================
+# Input Text - API Token Saklama
+# ==========================================
+
+input_text:
+  awaxen_api_token:
+    name: Awaxen API Token
+    mode: password
+    max: 500
+
+# ==========================================
+# Template Sensors - Awaxen için Özel Sensörler
+# ==========================================
+
+template:
+  - sensor:
+      - name: "Total Home Power"
+        unit_of_measurement: "W"
+        state_class: measurement
+        device_class: power
+        state: >
+          {{ states('sensor.tapo_plug_1_power') | float(0) +
+             states('sensor.shelly_plug_power') | float(0) +
+             states('sensor.other_device_power') | float(0) }}
+      
+      - name: "Total Daily Energy"
+        unit_of_measurement: "kWh"
+        state_class: total_increasing
+        device_class: energy
+        state: >
+          {{ states('sensor.tapo_plug_1_energy') | float(0) +
+             states('sensor.shelly_plug_energy') | float(0) }}
