@@ -36,6 +36,8 @@ x-common-env: &common-env
   # Flask
   FLASK_ENV: ${FLASK_ENV:-production}
   FLASK_DEBUG: ${FLASK_DEBUG:-false}
+  # CORS - Frontend origins (comma-separated)
+  CORS_ORIGINS: ${CORS_ORIGINS:-https://awaxen.vercel.app,https://api.awaxen.com,http://localhost:3000,http://localhost:3005}
   # Telegram
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
   # Logging
