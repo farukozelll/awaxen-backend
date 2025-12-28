@@ -1,13 +1,13 @@
+version: '3.8'
+
 # ============================================
-# Awaxen Backend Stack v6.0 - Docker Compose
-# Production-ready configuration
+# Awaxen Backend Stack v6.0 - Server Optimized
 # ============================================
-# 
 # Usage:
 #   Development: docker-compose up -d
 #   Production:  docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #   Logs:        docker-compose logs -f backend
-#   Scale:       docker-compose up -d --scale celery_worker=3
+#   Scale:       docker-compose up -d --scale
 
 x-common-env: &common-env
   # Database
@@ -36,13 +36,13 @@ x-common-env: &common-env
   # Flask
   FLASK_ENV: ${FLASK_ENV:-production}
   FLASK_DEBUG: ${FLASK_DEBUG:-false}
-  # CORS - Frontend origins (comma-separated)
+  # CORS
   CORS_ORIGINS: ${CORS_ORIGINS:-https://awaxen.vercel.app,https://api.awaxen.com,http://localhost:3000,http://localhost:3005}
   # Telegram
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
   # Logging
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  # MinIO (Object Storage)
+  # MinIO
   MINIO_ENDPOINT: minio:9000
   MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
   MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
@@ -64,7 +64,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - timescaledb_data:/var/lib/postgresql/data
+      # DÜZELTİLDİ: Sunucudaki veri yolu
+      - /mnt/awaxen-data/timescaledb:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     restart: unless-stopped
     networks:
@@ -92,7 +93,8 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      # DÜZELTİLDİ: Sunucudaki veri yolu
+      - /mnt/awaxen-data/redis:/data
     restart: unless-stopped
     networks:
       - awaxen_net
@@ -109,7 +111,7 @@ services:
           memory: 128M
 
   # ==========================================
-  # 3. BACKEND API (Flask + Gunicorn)
+  # 3. BACKEND API
   # ==========================================
   backend:
     build:
@@ -146,16 +148,11 @@ services:
           memory: 1G
         reservations:
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
   # ==========================================
-  # 4. CELERY WORKER (Background Tasks)
+  # 4. CELERY WORKER
   # ==========================================
   celery_worker:
     build:
@@ -180,14 +177,9 @@ services:
           memory: 1G
         reservations:
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   # ==========================================
-  # 5. CELERY BEAT (Task Scheduler)
+  # 5. CELERY BEAT
   # ==========================================
   celery_beat:
     build:
@@ -212,14 +204,9 @@ services:
           memory: 256M
         reservations:
           memory: 64M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   # ==========================================
-  # 6. MQTT Broker (Mosquitto)
+  # 6. MQTT Broker
   # ==========================================
   mqtt:
     image: eclipse-mosquitto:2
@@ -228,9 +215,11 @@ services:
       - "1883:1883"
       - "9001:9001"
     volumes:
-      - ./mosquitto/config:/mosquitto/config:ro
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_log:/mosquitto/log
+      # DÜZELTİLDİ: Config dosyası sabit yoldan
+      - /opt/awaxen/mosquitto/config:/mosquitto/config:ro
+      # DÜZELTİLDİ: Veriler sunucudaki diskten
+      - /mnt/awaxen-data/mosquitto/data:/mosquitto/data
+      - /mnt/awaxen-data/mosquitto/log:/mosquitto/log
     restart: unless-stopped
     networks:
       - awaxen_net
@@ -247,7 +236,7 @@ services:
           memory: 64M
 
   # ==========================================
-  # 7. FLOWER (Celery Monitoring) - Optional
+  # 7. FLOWER (Optional)
   # ==========================================
   flower:
     build:
@@ -273,7 +262,7 @@ services:
           memory: 256M
 
   # ==========================================
-  # 8. PGADMIN (Database Admin) - Optional
+  # 8. PGADMIN (Optional)
   # ==========================================
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -285,7 +274,8 @@ services:
     ports:
       - "5050:80"
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
+      # DÜZELTİLDİ: Veri yolu
+      - /mnt/awaxen-data/pgadmin:/var/lib/pgadmin
     depends_on:
       - db
     restart: unless-stopped
@@ -295,7 +285,7 @@ services:
       - tools
 
   # ==========================================
-  # 9. NGROK (Tunnel) - Development Only
+  # 9. NGROK (Development)
   # ==========================================
   ngrok:
     image: ngrok/ngrok:latest
@@ -314,35 +304,33 @@ services:
       - development
 
   # ==========================================
-  # 10. WATCHTOWER (Auto-Update)
+  # 10. WATCHTOWER
   # ==========================================
-  # Docker Hub'a yeni imaj attığında otomatik günceller
   watchtower:
     image: containrrr/watchtower:latest
     container_name: awaxen_watchtower
     environment:
-      DOCKER_API_VERSION: "1.44"  # Docker Desktop API versiyonu
+      DOCKER_API_VERSION: "1.44"
       WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_POLL_INTERVAL: 300  # 5 dakikada bir kontrol
+      WATCHTOWER_POLL_INTERVAL: 300
       WATCHTOWER_INCLUDE_STOPPED: "false"
       WATCHTOWER_REVIVE_STOPPED: "false"
-      WATCHTOWER_NOTIFICATIONS: "shoutrrr"
-      WATCHTOWER_NOTIFICATION_URL: ${WATCHTOWER_NOTIFICATION_URL:-}
-      WATCHTOWER_LABEL_ENABLE: "true"  # Sadece label'lı container'ları güncelle
+      WATCHTOWER_LABEL_ENABLE: "true"
     volumes:
-      - //var/run/docker.sock:/var/run/docker.sock  # Windows Docker Desktop için
+      # DÜZELTİLDİ: Windows path (//) yerine Linux path (/)
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     networks:
       - awaxen_net
     labels:
-      - "com.centurylinklabs.watchtower.enable=false"  # Kendini güncellemesin
+      - "com.centurylinklabs.watchtower.enable=false"
     deploy:
       resources:
         limits:
           memory: 128M
 
   # ==========================================
-  # 11. MINIO (S3-Compatible Object Storage)
+  # 11. MINIO
   # ==========================================
   minio:
     image: minio/minio:latest
@@ -352,10 +340,11 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     ports:
-      - "9000:9000"   # S3 API
-      - "9002:9002"   # Web Console
+      - "9000:9000"
+      - "9002:9002"
     volumes:
-      - minio_data:/data
+      # DÜZELTİLDİ: Veri yolu
+      - /mnt/awaxen-data/minio:/data
     restart: unless-stopped
     networks:
       - awaxen_net
@@ -374,66 +363,8 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
 
   # ==========================================
-  # 12. AI WORKER (YOLO + SAM2 - Ayrı Konteyner)
+  # 12. HOME ASSISTANT
   # ==========================================
-  # PyTorch ve AI kütüphaneleri çok büyük, ayrı konteyner gerekli
-  ai_worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.ai
-    container_name: awaxen_ai_worker
-    command: celery -A app.celery_app worker --loglevel=${LOG_LEVEL:-info} --concurrency=2 --queues=ai_tasks -n ai_worker@%h
-    environment:
-      <<: *common-env
-      C_FORCE_ROOT: "true"
-      # MinIO Configuration
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin123}
-      MINIO_BUCKET: ${MINIO_BUCKET:-awaxen-images}
-      MINIO_SECURE: "false"
-      # AI Configuration
-      AI_MODEL_PATH: /app/models
-      AI_CONFIDENCE_THRESHOLD: ${AI_CONFIDENCE_THRESHOLD:-0.40}
-      ENABLE_SAHI: ${ENABLE_SAHI:-true}
-    volumes:
-      - ./ai_models:/app/models:ro  # ONNX modelleri için bind mount (read-only)
-      - ai_cache:/root/.cache
-    depends_on:
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - awaxen_net
-    deploy:
-      resources:
-        limits:
-          memory: 4G  # AI modelleri için yüksek RAM
-        reservations:
-          memory: 2G
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-
-  # ==========================================
-  # 13. HOME ASSISTANT (Universal IoT Adapter)
-  # ==========================================
-  # Home Assistant acts as a universal adapter for all IoT devices.
-  # It connects to devices (Shelly, Tapo, Tuya, Philips Hue, etc.)
-  # and sends standardized data to Awaxen via MQTT.
-  #
-  # Setup Steps:
-  # 1. Access HA at http://localhost:8123
-  # 2. Create account and complete onboarding
-  # 3. Go to Settings -> Devices & Services -> Add Integration -> MQTT
-  # 4. Configure MQTT broker: mqtt (or awaxen_mqtt), port 1883
-  # 5. Add MQTT Statestream to configuration.yaml (see homeassistant/configuration.yaml)
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
     container_name: awaxen_homeassistant
@@ -442,8 +373,10 @@ services:
     ports:
       - "8123:8123"
     volumes:
-      - homeassistant_config:/config
-      - ./homeassistant:/config/custom_config:ro
+      # DÜZELTİLDİ: Config dosyaları sabit yoldan
+      - /mnt/awaxen-data/homeassistant:/config
+      # DÜZELTİLDİ: Custom config yolu
+      - /opt/awaxen/homeassistant:/config/custom_config:ro
     depends_on:
       - mqtt
     restart: unless-stopped
@@ -460,27 +393,6 @@ services:
           memory: 512M
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
-
-# ==========================================
-# VOLUMES
-# ==========================================
-volumes:
-  timescaledb_data:
-    driver: local
-  redis_data:
-    driver: local
-  mosquitto_data:
-    driver: local
-  mosquitto_log:
-    driver: local
-  pgadmin_data:
-    driver: local
-  minio_data:
-    driver: local
-  ai_cache:
-    driver: local
-  homeassistant_config:
-    driver: local
 
 # ==========================================
 # NETWORKS
