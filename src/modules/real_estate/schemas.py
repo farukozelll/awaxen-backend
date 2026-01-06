@@ -1,9 +1,13 @@
 """
 RealEstate Module - Pydantic Schemas (DTOs)
+
+Best Practice: Her alan için description ve example ekle.
+Swagger'da "Bu alana ne yazacağım?" sorusu kalmasın.
 """
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -16,28 +20,124 @@ from src.modules.real_estate.models import (
 # ============== Asset Schemas ==============
 
 class AssetBase(BaseModel):
-    """Base asset schema."""
-    name: str = Field(..., min_length=1, max_length=255)
-    code: str = Field(..., min_length=1, max_length=100)
-    description: str | None = None
-    asset_type: AssetType
-    address: str | None = None
-    latitude: Decimal | None = Field(None, ge=-90, le=90)
-    longitude: Decimal | None = Field(None, ge=-180, le=180)
-    area_sqm: Decimal | None = Field(None, ge=0)
-    floor_number: int | None = None
-    status: AssetStatus = AssetStatus.ACTIVE
-    metadata_: dict | None = Field(None, alias="metadata")
+    """
+    Mülk (Asset) temel şeması.
+    
+    Asset, Awaxen'de yönetilen her türlü gayrimenkulü temsil eder:
+    Site, Blok, Kat, Daire, Villa, Fabrika vb.
+    """
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Mülkün görünen adı",
+        examples=["Deniz Villa", "A Blok", "Kat 3", "Daire 5"],
+    )
+    code: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Benzersiz mülk kodu (slug formatında)",
+        examples=["deniz-villa", "a-blok", "kat-3", "daire-5"],
+    )
+    description: str | None = Field(
+        None,
+        max_length=1000,
+        description="Mülk açıklaması",
+        examples=["Deniz manzaralı 3+1 villa, özel havuzlu"],
+    )
+    asset_type: AssetType = Field(
+        ...,
+        description="Mülk tipi (site/block/floor/unit/villa/factory)",
+        examples=["villa"],
+    )
+    address: str | None = Field(
+        None,
+        max_length=500,
+        description="Tam adres",
+        examples=["Atatürk Cad. No:123, Bodrum/Muğla"],
+    )
+    latitude: Decimal | None = Field(
+        None,
+        ge=-90,
+        le=90,
+        description="Enlem koordinatı (WGS84)",
+        examples=[37.0344],
+    )
+    longitude: Decimal | None = Field(
+        None,
+        ge=-180,
+        le=180,
+        description="Boylam koordinatı (WGS84)",
+        examples=[27.4305],
+    )
+    area_sqm: Decimal | None = Field(
+        None,
+        ge=0,
+        description="Alan (metrekare)",
+        examples=[150.5],
+    )
+    floor_number: int | None = Field(
+        None,
+        ge=-10,
+        le=200,
+        description="Kat numarası (-1: bodrum, 0: zemin)",
+        examples=[3],
+    )
+    status: AssetStatus = Field(
+        default=AssetStatus.ACTIVE,
+        description="Mülk durumu",
+        examples=["active"],
+    )
+    metadata_: dict | None = Field(
+        None,
+        alias="metadata",
+        description="Ek bilgiler (JSON formatında)",
+        examples=[{"pool": True, "garden": True, "parking": 2}],
+    )
 
 
 class AssetCreate(AssetBase):
-    """Schema for creating an asset."""
-    parent_id: uuid.UUID | None = None
+    """
+    Yeni mülk oluşturma şeması.
+    
+    Hiyerarşik yapı için parent_id kullanılır:
+    - Site → parent_id: null
+    - Blok → parent_id: site_id
+    - Kat → parent_id: block_id
+    - Daire → parent_id: floor_id
+    """
+    parent_id: uuid.UUID | None = Field(
+        None,
+        description="Üst mülk ID'si (hiyerarşi için)",
+        examples=["550e8400-e29b-41d4-a716-446655440000"],
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "Deniz Villa",
+                "code": "deniz-villa",
+                "description": "Deniz manzaralı 3+1 villa",
+                "asset_type": "villa",
+                "address": "Atatürk Cad. No:123, Bodrum/Muğla",
+                "latitude": 37.0344,
+                "longitude": 27.4305,
+                "area_sqm": 150.5,
+                "status": "active",
+                "metadata": {"pool": True, "garden": True},
+            }
+        }
+    )
 
 
 class AssetUpdate(BaseModel):
-    """Schema for updating an asset."""
-    name: str | None = Field(None, min_length=1, max_length=255)
+    """
+    Mülk güncelleme şeması.
+    
+    Sadece değiştirilmek istenen alanlar gönderilir.
+    """
+    name: str | None = Field(None, min_length=1, max_length=255, description="Mülk adı")
     code: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = None
     address: str | None = None

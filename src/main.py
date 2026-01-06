@@ -7,6 +7,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import ORJSONResponse
 
 from src.core.config import settings
@@ -370,6 +371,191 @@ Sistem durumu ve metrikler.
 ]
 
 
+# =============================================================================
+# OPENAPI DESCRIPTION - Swagger Üst Kısım Açıklaması
+# =============================================================================
+API_DESCRIPTION = """
+# 🌞 Awaxen - Hibrit Enerji Yönetim Platformu
+
+**Enterprise-grade PropTech + EnergyTech/IoT SaaS Backend**
+
+---
+
+## 🏗️ Sistem Mimarisi
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│       │     │    Web App PWA  │     │   Admin Panel   │
+│  │     │    React.js   │     │    Next.js    │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+        │                        │                        │
+        └────────────┬───────────┴────────────┘
+                     │
+        ┌────────────┴────────────┐
+        │      🔐 Auth0 (JWT)       │
+        └────────────┬────────────┘
+                     │
+        ┌────────────┴────────────┐
+        │   🚀 Awaxen Backend      │
+        │      (FastAPI)         │
+        └───┬───────┬───────┬────┘
+            │       │       │
+    ┌───────┴─┐ ┌───┴───┐ ┌─┴───────┐
+    │PostgreSQL│ │ Redis │ │  MQTT     │
+    │TimescaleDB│ │(Cache)│ │(Mosquitto)│
+    └──────────┘ └───────┘ └────┬─────┘
+                              │
+                    ┌─────────┴─────────┐
+                    │  📡 IoT Gateway    │
+                    │  (Raspberry Pi CM5)│
+                    └─────────┬─────────┘
+                              │
+              ┌─────────┬─────┴────┬─────────┐
+              │         │           │         │
+          ┌───┴───┐ ┌───┴───┐ ┌───┴───┐ ┌───┴───┐
+          │ Shelly │ │ Meter │ │Thermos.│ │ Sensor │
+          └────────┘ └───────┘ └────────┘ └────────┘
+```
+
+---
+
+## 🔢 API Versiyonlama
+
+| Versiyon | Prefix | Durum |
+|----------|--------|-------|
+| **v1** | `/api/v1/` | ✅ Aktif |
+| v2 | `/api/v2/` | 🚧 Planlanıyor |
+
+> ⚠️ **Önemli:** Tüm endpoint'ler `/api/v1/` prefix'i ile başlar. Versiyonsuz istekler `404 Not Found` döner.
+
+```bash
+# ✅ Doğru
+curl https://api.awaxen.com/api/v1/auth/me
+
+# ❌ Yanlış
+curl https://api.awaxen.com/auth/me
+```
+
+---
+
+## � Kimlik Doğrulama (Authentication)
+
+Tüm API endpoint'leri **JWT Bearer token** gerektirir. Token'lar [Auth0](https://auth0.com) üzerinden alınır.
+
+### Token Alma
+```typescript
+// Frontend (React/Next.js)
+import { useAuth0 } from '@auth0/auth0-react';
+
+const { getAccessTokenSilently } = useAuth0();
+const token = await getAccessTokenSilently();
+```
+
+### API İsteği
+```bash
+curl -X GET "https://api.awaxen.com/api/v1/auth/me" \
+  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+### Hata Kodları
+| Kod | Açıklama |
+|-----|----------|
+| `401` | Token eksik veya geçersiz |
+| `403` | Yetki yetersiz |
+| `422` | Validasyon hatası |
+
+---
+
+## 📊 API Grupları
+
+| Grup | Prefix | Açıklama |
+|------|--------|----------|
+| **Auth** | `/api/v1/auth` | Kullanıcı kimlik doğrulama |
+| **Real Estate** | `/api/v1/real-estate` | Mülk yönetimi (Asset, Zone, Tenancy) |
+| **IoT** | `/api/v1/iot` | Gateway ve cihaz yönetimi |
+| **Energy** | `/api/v1/energy` | Enerji tasarruf önerileri |
+| **Rewards** | `/api/v1/rewards` | AWX puan sistemi |
+| **Maintenance** | `/api/v1/maintenance` | Bakım işleri ve marketplace |
+| **Compliance** | `/api/v1/compliance` | KVKK/GDPR uyumluluk |
+| **Billing** | `/api/v1/billing` | Cüzdan ve işlemler |
+| **Dashboard** | `/api/v1/dashboard` | Analitik ve özet |
+| **Notifications** | `/api/v1/notifications` | Bildirim yönetimi |
+| **Integrations** | `/api/v1/integrations` | Dış servisler (EPİAŞ, Hava) |
+| **SSE** | `/api/v1/sse` | Realtime event stream |
+
+---
+
+## 🚀 Rate Limiting
+
+| Endpoint Tipi | Limit | Pencere |
+|---------------|-------|--------|
+| Standard | 100 | /dakika |
+| AI/ML | 10 | /dakika |
+| SSE | 5 | /bağlantı |
+
+Aşıldığında `429 Too Many Requests` döner.
+
+---
+
+## 📝 Pagination
+
+Tüm liste endpoint'leri pagination destekler:
+
+```bash
+GET /api/v1/real-estate/assets?page=1&page_size=20
+```
+
+| Parametre | Tip | Default | Max | Açıklama |
+|-----------|-----|---------|-----|----------|
+| `page` | int | 1 | - | Sayfa numarası |
+| `page_size` | int | 20 | 100 | Sayfa başına kayıt |
+
+### Response Format
+```json
+{
+  "items": [...],
+  "total": 150,
+  "page": 1,
+  "page_size": 20,
+  "pages": 8
+}
+```
+
+---
+
+## ⚠️ Hata Formatı (Error Response)
+
+Tüm hatalar RFC 7807 uyumlu JSON formatında döner:
+
+```json
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Asset with identifier 'abc123' not found",
+    "details": {
+      "resource": "Asset",
+      "identifier": "abc123"
+    },
+    "request_id": "req_abc123xyz",
+    "timestamp": "2024-01-15T10:30:00Z",
+    "path": "/api/v1/real-estate/assets/abc123",
+    "method": "GET"
+  }
+}
+```
+
+---
+
+## 🔗 Yararlı Linkler
+
+- 📖 [API Dokümantasyonu](https://api.awaxen.com/docs)
+- 📚 [ReDoc](https://api.awaxen.com/redoc)
+- 💻 [GitHub](https://github.com/farukozelll/awaxen-backend)
+- 🌐 [Website](https://awaxen.com)
+- 📧 [Destek](mailto:support@awaxen.com)
+"""
+
+
 def create_application() -> FastAPI:
     """
     Application factory function.
@@ -378,91 +564,125 @@ def create_application() -> FastAPI:
     TRICK: Use ORJSONResponse as default for 10x faster JSON serialization.
     """
     app = FastAPI(
-        title=settings.project_name,
-        description="""
-# 🌞 Awaxen Hibrit Enerji Yönetim Platformu
-
-**Enterprise-grade IoT & Energy Management SaaS Backend**
-
-## 🔢 API Versiyonlama
-
-**Tüm endpoint'ler `/api/v1/` prefix'i ile başlar.**
-
-```
-✅ Doğru:   https://api.awaxen.com/api/v1/auth/me
-❌ Yanlış:  https://api.awaxen.com/api/auth/me
-❌ Yanlış:  https://api.awaxen.com/auth/me
-```
-
-> ⚠️ Versiyonsuz istekler `404 Not Found` döner.
-
-## 🔑 Authentication (Kimlik Doğrulama)
-
-Tüm API endpoint'leri JWT Bearer token gerektirir. Token'lar Auth0'dan alınır.
-
-```
-Authorization: Bearer <your_jwt_token>
-```
-
-## 📊 API Grupları
-
-| Grup | Prefix | Açıklama |
-|------|--------|----------|
-| **Auth** | `/api/v1/auth` | Kimlik doğrulama ve kullanıcı yönetimi |
-| **Dashboard** | `/api/v1/dashboard` | Özet ve analitik verileri |
-| **Notifications** | `/api/v1/notifications` | Bildirim yönetimi (Push, Telegram) |
-| **IoT** | `/api/v1/iot` | IoT cihaz CRUD işlemleri |
-| **Billing** | `/api/v1/billing` | Cüzdan ve işlem geçmişi |
-| **Integrations** | `/api/v1/integrations` | EPİAŞ, hava durumu |
-| **Real Estate** | `/api/v1/real-estate` | Gayrimenkul yönetimi |
-
-## 🚀 Rate Limiting
-- Standard: 100 req/min
-- AI Endpoints: 10 req/min
-
-## 📝 Pagination
-Tüm liste endpoint'leri pagination destekler:
-- `page`: Sayfa numarası (default: 1)
-- `pageSize`: Sayfa başına kayıt (default: 20, max: 100)
-
-## 🔗 Frontend Entegrasyonu
-```typescript
-const API_BASE = "https://api.awaxen.com/api/v1";
-
-// Auth0 ile giriş yap
-const token = await auth0.getAccessTokenSilently();
-
-// Kullanıcıyı senkronize et
-await fetch(`${API_BASE}/auth/sync`, {
-  method: "POST",
-  headers: { "Authorization": `Bearer ${token}` },
-  body: JSON.stringify({ auth0_id, email, name, role })
-});
-
-// Profil bilgilerini al
-const profile = await fetch(`${API_BASE}/auth/me`, {
-  headers: { "Authorization": `Bearer ${token}` }
-});
-```
-        """,
-        version="1.0.0",
-        debug=settings.debug,
-        lifespan=lifespan,
-        default_response_class=ORJSONResponse,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        # === METADATA (Kimlik Kartı) ===
+        title="Awaxen API",
+        summary="Hibrit Enerji Yönetim Platformu - PropTech + EnergyTech/IoT SaaS",
+        description=API_DESCRIPTION,
+        version=settings.app_version,
+        
+        # === OPENAPI CONFIG ===
         openapi_url="/openapi.json",
         openapi_tags=TAGS_METADATA,
+        
+        # === DOCS CONFIG ===
+        docs_url="/docs",
+        redoc_url="/redoc",
+        swagger_ui_parameters={
+            "defaultModelsExpandDepth": -1,  # Şemaları varsayılan kapalı tut
+            "docExpansion": "list",  # Endpoint'leri liste olarak göster
+            "filter": True,  # Arama filtresi aktif
+            "showExtensions": True,
+            "showCommonExtensions": True,
+            "syntaxHighlight.theme": "monokai",
+            "tryItOutEnabled": True,  # "Try it out" varsayılan açık
+            "persistAuthorization": True,  # Token'u hatırla
+        },
+        
+        # === CONTACT & LICENSE ===
         contact={
             "name": "Awaxen Team",
-            "email": "team@awaxen.com",
             "url": "https://awaxen.com",
+            "email": "api@awaxen.com",
         },
         license_info={
-            "name": "MIT",
-            "url": "https://opensource.org/licenses/MIT",
+            "name": "Proprietary",
+            "url": "https://awaxen.com/terms",
         },
+        terms_of_service="https://awaxen.com/terms",
+        
+        # === PERFORMANCE ===
+        default_response_class=ORJSONResponse,
+        debug=settings.debug,
+        lifespan=lifespan,
     )
+    
+    # === CUSTOM OPENAPI SCHEMA ===
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        
+        openapi_schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            summary=app.summary,
+            description=app.description,
+            routes=app.routes,
+            tags=TAGS_METADATA,
+        )
+        
+        # === SECURITY SCHEME (Swagger Authorize Butonu) ===
+        openapi_schema["components"]["securitySchemes"] = {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": """
+**Auth0 JWT Token**
+
+Token almak için:
+1. Auth0 Dashboard'dan token al
+2. Veya frontend üzerinden `getAccessTokenSilently()` kullan
+
+```
+Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
+```
+                """,
+            },
+            "OAuth2": {
+                "type": "oauth2",
+                "flows": {
+                    "authorizationCode": {
+                        "authorizationUrl": f"https://{settings.auth0_domain}/authorize",
+                        "tokenUrl": f"https://{settings.auth0_domain}/oauth/token",
+                        "scopes": {
+                            "openid": "OpenID Connect",
+                            "profile": "Kullanıcı profili",
+                            "email": "E-posta adresi",
+                        },
+                    }
+                },
+            },
+        }
+        
+        # Global security (tüm endpoint'ler için)
+        openapi_schema["security"] = [{"BearerAuth": []}]
+        
+        # Server bilgisi
+        openapi_schema["servers"] = [
+            {
+                "url": "https://api.awaxen.com",
+                "description": "🌐 Production Server",
+            },
+            {
+                "url": "https://staging-api.awaxen.com",
+                "description": "🧪 Staging Server",
+            },
+            {
+                "url": "http://localhost:8000",
+                "description": "💻 Local Development",
+            },
+        ]
+        
+        # External docs
+        openapi_schema["externalDocs"] = {
+            "description": "📚 Tam Dokümantasyon",
+            "url": "https://docs.awaxen.com",
+        }
+        
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+    
+    app.openapi = custom_openapi
     
     # Initialize Sentry
     try:
