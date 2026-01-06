@@ -1,0 +1,115 @@
+[project]
+name = "awaxen-backend"
+version = "0.1.0"
+description = "Awaxen - Hybrid SaaS Platform (PropTech + EnergyTech/IoT) Backend"
+authors = [{ name = "Awaxen Team", email = "team@awaxen.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    # Web Framework
+    "fastapi>=0.115.5",
+    "uvicorn[standard]>=0.30.6",
+    "gunicorn>=21.2.0",
+    
+    # Data Validation & Settings
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.6.1",
+    "email-validator>=2.2.0",
+    
+    # Database
+    "sqlalchemy[asyncio]>=2.0.35",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.3",
+    
+    # Security & Encryption
+    "passlib[bcrypt]>=1.7.4",
+    "python-jose[cryptography]>=3.3.0",
+    "cryptography>=41.0.0",
+    
+    # Auth0 Integration
+    "authlib>=1.3.0",
+    
+    # Task Queue
+    "celery[redis]>=5.3.6",
+    "redis>=5.0.0",
+    "flower>=2.0.0",
+    
+    # MQTT / IoT
+    "aiomqtt>=2.0.0",
+    "paho-mqtt>=2.0.0",
+    
+    # HTTP Client
+    "httpx>=0.27.2",
+    
+    # JSON Performance (TRICK: 10x faster than stdlib)
+    "orjson>=3.9.10",
+    
+    # Logging
+    "structlog>=24.1.0",
+    
+    # Storage
+    "minio>=7.2.0",
+    
+    # Utilities
+    "python-multipart>=0.0.9",
+    "python-dateutil>=2.8.2",
+    "pytz>=2024.1",
+]
+readme = "README.md"
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: FastAPI",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.7.3",
+    "mypy>=1.12.0",
+    "pre-commit>=3.6.0",
+    "httpx>=0.27.2",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "N", "S", "C4", "DTZ", "T20", "RUF"]
+ignore = ["E203", "E266", "E501", "S101", "S104", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.setuptools]
+package-dir = { "" = "." }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+exclude = ["tests*", "alembic*"]

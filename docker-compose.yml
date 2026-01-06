@@ -1,0 +1,290 @@
+services:
+  # ============================================
+  # NGINX REVERSE PROXY (Cloudflare Ready)
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: awaxen_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./config/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # FASTAPI BACKEND
+  # ============================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awaxen_backend
+    command: >
+      gunicorn src.main:app
+      --workers 4
+      --worker-class uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
+      --access-logfile -
+      --error-logfile -
+      --timeout 120
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@db:${DB_PORT}/${DB_NAME}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - MQTT_BROKER_URL=mqtt
+      - MQTT_BROKER_PORT=1883
+      - MINIO_ENDPOINT=minio:9000
+      # Auth0 Configuration
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    volumes:
+      - .:/app
+      - app_logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # CELERY WORKER
+  # ============================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awaxen_worker
+    command: celery -A src.worker.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@db:${DB_PORT}/${DB_NAME}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # CELERY BEAT SCHEDULER
+  # ============================================
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awaxen_beat
+    command: celery -A src.worker.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - worker
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # FLOWER - CELERY MONITORING
+  # ============================================
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awaxen_flower
+    command: celery -A src.worker.celery_app flower --port=5555 --basic_auth=admin:admin
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - worker
+      - redis
+    restart: unless-stopped
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # POSTGRESQL + TIMESCALEDB
+  # ============================================
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: awaxen_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-awaxen_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-awaxen_secret_password}
+      POSTGRES_DB: ${DB_NAME:-awaxen_core}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./scripts/init-timescale.sql:/docker-entrypoint-initdb.d/01-init-timescale.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-awaxen_user} -d ${DB_NAME:-awaxen_core}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # PGADMIN - DATABASE MANAGEMENT UI
+  # ============================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: awaxen_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@awaxen.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # REDIS (CACHE + CELERY BROKER)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: awaxen_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # MQTT BROKER (MOSQUITTO) - IOT/SHELLY
+  # ============================================
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: awaxen_mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9002:9001"
+    volumes:
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./config/mosquitto/password.txt:/mosquitto/config/password.txt:ro
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # MINIO (S3 COMPATIBLE STORAGE)
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: awaxen_minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # WATCHTOWER - AUTO UPDATE CONTAINERS
+  # ============================================
+  watchtower:
+    image: containrrr/watchtower
+    container_name: awaxen_watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=86400
+      - WATCHTOWER_INCLUDE_STOPPED=false
+      - WATCHTOWER_NOTIFICATIONS=slack
+      - TZ=Europe/Istanbul
+    command: --interval 86400
+    networks:
+      - awaxen_network
+
+# ============================================
+# NETWORKS
+# ============================================
+networks:
+  awaxen_network:
+    driver: bridge
+
+# ============================================
+# VOLUMES
+# ============================================
+volumes:
+  db_data:
+  redis_data:
+  mqtt_data:
+  mqtt_log:
+  minio_data:
+  pgadmin_data:
+  nginx_logs:
+  app_logs:
