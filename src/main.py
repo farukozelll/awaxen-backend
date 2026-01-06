@@ -657,21 +657,29 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
         # Global security (tüm endpoint'ler için)
         openapi_schema["security"] = [{"BearerAuth": []}]
         
-        # Server bilgisi
-        openapi_schema["servers"] = [
-            {
-                "url": "https://api.awaxen.com",
-                "description": "🌐 Production Server",
-            },
-            {
-                "url": "https://staging-api.awaxen.com",
-                "description": "🧪 Staging Server",
-            },
-            {
-                "url": "http://localhost:8000",
-                "description": "💻 Local Development",
-            },
-        ]
+        # Server bilgisi - Development modunda localhost önce gelsin
+        if settings.debug:
+            openapi_schema["servers"] = [
+                {
+                    "url": "/",
+                    "description": "💻 Current Server (Relative)",
+                },
+                {
+                    "url": "http://localhost:8000",
+                    "description": "💻 Local Development",
+                },
+            ]
+        else:
+            openapi_schema["servers"] = [
+                {
+                    "url": "https://api.awaxen.com",
+                    "description": "🌐 Production Server",
+                },
+                {
+                    "url": "https://staging-api.awaxen.com",
+                    "description": "🧪 Staging Server",
+                },
+            ]
         
         # External docs
         openapi_schema["externalDocs"] = {
