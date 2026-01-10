@@ -26,6 +26,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Her seferinde güncel kod için cache kullanma
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    pull_policy: always
     container_name: awaxen_backend
     command: >
       gunicorn src.main:app
@@ -39,9 +43,12 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@db:${DB_PORT}/${DB_NAME}
+      # Redis Broker (Celery) - noeviction policy
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Redis Cache (API) - volatile-lru policy
+      - REDIS_CACHE_URL=redis://redis_cache:6379/0
       - MQTT_BROKER_URL=mqtt
       - MQTT_BROKER_PORT=1883
       - MINIO_ENDPOINT=minio:9000
@@ -70,6 +77,29 @@ services:
       start_period: 40s
     networks:
       - awaxen_network
+
+  # ============================================
+  # ALEMBIC MIGRATIONS
+  # ============================================
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awaxen_migrate
+    command: alembic upgrade head
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@db:${DB_PORT}/${DB_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - awaxen_network
+    profiles:
+      - migrate
 
   # ============================================
   # CELERY WORKER
@@ -189,17 +219,41 @@ services:
       - awaxen_network
 
   # ============================================
-  # REDIS (CACHE + CELERY BROKER)
+  # REDIS BROKER (CELERY - İş Kuyruğu)
   # ============================================
+  # TRICK: Celery broker için noeviction kullan.
+  # Bellek dolarsa hata ver, veri silme!
   redis:
     image: redis:7-alpine
-    container_name: awaxen_redis
+    container_name: awaxen_redis_broker
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+      - redis_broker_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # REDIS CACHE (API Cache - Hızlı Erişim)
+  # ============================================
+  # TRICK: Cache için volatile-lru kullan.
+  # Sadece TTL'i olan (expire) verileri sil.
+  redis_cache:
+    image: redis:7-alpine
+    container_name: awaxen_redis_cache
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_cache_data:/data
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -281,7 +335,8 @@ networks:
 # ============================================
 volumes:
   db_data:
-  redis_data:
+  redis_broker_data:
+  redis_cache_data:
   mqtt_data:
   mqtt_log:
   minio_data:

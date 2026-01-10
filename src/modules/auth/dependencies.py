@@ -172,8 +172,14 @@ def require_permissions(permissions: list[str]):
     """
     Dependency factory for permission-based access control.
     
+    Rol Hiyerarşisi:
+    - admin: Tüm yetkiler ("*")
+    - tenant: Organizasyon yönetimi yetkileri
+    - user: Salt okunur yetkiler
+    - device: Telemetri yetkileri
+    
     Usage:
-        @router.get("/admin", dependencies=[Depends(require_permissions(["admin:read"]))])
+        @router.get("/admin", dependencies=[Depends(require_permissions(["audit:read"]))])
         async def admin_endpoint(): ...
     
     Or as a dependency:
@@ -188,9 +194,18 @@ def require_permissions(permissions: list[str]):
         
         # Check user's permissions from organization memberships
         user_permissions: set[str] = set()
+        user_role: str | None = None
+        
         for membership in current_user.organization_memberships:
             if membership.role and membership.role.permissions:
                 user_permissions.update(membership.role.permissions)
+                # Track if user has admin role
+                if membership.role.code == "admin":
+                    user_role = "admin"
+        
+        # Admin role has all permissions (wildcard)
+        if user_role == "admin" or "*" in user_permissions:
+            return current_user
         
         # Check if user has required permissions
         missing = set(permissions) - user_permissions
@@ -200,6 +215,36 @@ def require_permissions(permissions: list[str]):
         return current_user
     
     return permission_checker
+
+
+def require_role(roles: list[str]):
+    """
+    Dependency factory for role-based access control.
+    
+    Usage:
+        @router.get("/admin-only", dependencies=[Depends(require_role(["admin"]))])
+        async def admin_endpoint(): ...
+    """
+    async def role_checker(
+        current_user: Annotated[User, Depends(get_current_user)],
+    ) -> User:
+        # Superusers bypass role check
+        if current_user.is_superuser:
+            return current_user
+        
+        # Check user's roles from organization memberships
+        user_roles: set[str] = set()
+        for membership in current_user.organization_memberships:
+            if membership.role:
+                user_roles.add(membership.role.code)
+        
+        # Check if user has any of the required roles
+        if not user_roles.intersection(set(roles)):
+            raise ForbiddenError(f"Required role: {', '.join(roles)}")
+        
+        return current_user
+    
+    return role_checker
 
 
 # Type aliases for dependency injection

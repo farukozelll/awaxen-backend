@@ -24,17 +24,239 @@ class RoleType(str, Enum):
     Predefined role types for RBAC.
     
     Hiyerarşi:
-    1. super_admin - Tam sistem yetkisi (tüm organizasyonlar)
-    2. admin - Organizasyon yönetimi (kendi org'unda tam yetki)
-    3. operator - Cihaz kontrolü ve telemetri
-    4. user - Salt okunur erişim
-    5. agent - Kiracı bulma, sözleşme yönetimi
+    1. admin - Sistem yöneticisi (tüm organizasyonları yönetir, rol ve permission atar)
+    2. tenant - Organizasyon yöneticisi (kendi org'unda tam yetki)
+    3. user - Normal kullanıcı (salt okunur erişim)
+    4. device - Cihaz/Telemetri erişimi (IoT endpoint'leri için)
     """
-    SUPER_ADMIN = "super_admin"
-    ADMIN = "admin"
-    OPERATOR = "operator"
-    USER = "user"
-    AGENT = "agent"
+    ADMIN = "admin"      # Sistem yöneticisi - tüm yetkiler
+    TENANT = "tenant"    # Organizasyon yöneticisi
+    USER = "user"        # Normal kullanıcı
+    DEVICE = "device"    # Telemetri erişimi
+
+
+class Permission(str, Enum):
+    """
+    Sistem genelinde tanımlı yetkiler.
+    Admin tüm yetkilere sahiptir.
+    Tenant kendi organizasyonunda yetki atayabilir.
+    """
+    # Organizasyon yönetimi
+    ORG_CREATE = "org:create"           # Yeni organizasyon oluştur
+    ORG_READ = "org:read"               # Organizasyon bilgilerini görüntüle
+    ORG_UPDATE = "org:update"           # Organizasyon bilgilerini güncelle
+    ORG_DELETE = "org:delete"           # Organizasyon sil
+    
+    # Kullanıcı yönetimi
+    USER_CREATE = "user:create"         # Yeni kullanıcı oluştur
+    USER_READ = "user:read"             # Kullanıcı bilgilerini görüntüle
+    USER_UPDATE = "user:update"         # Kullanıcı bilgilerini güncelle
+    USER_DELETE = "user:delete"         # Kullanıcı sil
+    
+    # Rol ve yetki yönetimi (sadece admin)
+    ROLE_ASSIGN = "role:assign"         # Rol ata
+    PERMISSION_ASSIGN = "permission:assign"  # Yetki ata
+    
+    # Asset yönetimi
+    ASSET_CREATE = "asset:create"       # Asset oluştur
+    ASSET_READ = "asset:read"           # Asset görüntüle
+    ASSET_UPDATE = "asset:update"       # Asset güncelle
+    ASSET_DELETE = "asset:delete"       # Asset sil
+    
+    # Zone yönetimi
+    ZONE_CREATE = "zone:create"         # Zone oluştur
+    ZONE_READ = "zone:read"             # Zone görüntüle
+    ZONE_UPDATE = "zone:update"         # Zone güncelle
+    ZONE_DELETE = "zone:delete"         # Zone sil
+    
+    # Cihaz yönetimi
+    DEVICE_CREATE = "device:create"     # Cihaz ekle
+    DEVICE_READ = "device:read"         # Cihaz görüntüle
+    DEVICE_UPDATE = "device:update"     # Cihaz güncelle
+    DEVICE_DELETE = "device:delete"     # Cihaz sil
+    DEVICE_CONTROL = "device:control"   # Cihaz kontrol et (aç/kapa)
+    
+    # Telemetri
+    TELEMETRY_READ = "telemetry:read"   # Telemetri verilerini görüntüle
+    TELEMETRY_WRITE = "telemetry:write" # Telemetri verisi gönder
+    
+    # Gateway yönetimi
+    GATEWAY_CREATE = "gateway:create"   # Gateway ekle
+    GATEWAY_READ = "gateway:read"       # Gateway görüntüle
+    GATEWAY_UPDATE = "gateway:update"   # Gateway güncelle
+    GATEWAY_DELETE = "gateway:delete"   # Gateway sil
+    
+    # Billing
+    BILLING_READ = "billing:read"       # Fatura/ödeme görüntüle
+    BILLING_MANAGE = "billing:manage"   # Fatura/ödeme yönet
+    
+    # Audit
+    AUDIT_READ = "audit:read"           # Denetim loglarını görüntüle
+    
+    # Energy/Recommendation
+    ENERGY_READ = "energy:read"         # Enerji verilerini görüntüle
+    RECOMMENDATION_READ = "recommendation:read"   # Önerileri görüntüle
+    RECOMMENDATION_APPROVE = "recommendation:approve"  # Öneriyi onayla
+    
+    # Reward/Ledger
+    REWARD_READ = "reward:read"         # Ödülleri görüntüle
+    LEDGER_READ = "ledger:read"         # Ledger görüntüle
+
+
+class ModuleType(str, Enum):
+    """
+    Organizasyona atanabilir modüller.
+    Her modül belirli permission'ları ve özellikleri içerir.
+    Admin organizasyon oluştururken bu modülleri atar.
+    """
+    # Core modüller (her organizasyonda varsayılan)
+    CORE = "core"                   # Temel özellikler (auth, org, user)
+    
+    # Asset/Property yönetimi
+    ASSET_MANAGEMENT = "asset_management"   # Asset, Zone yönetimi
+    
+    # IoT modülleri
+    IOT = "iot"                     # Gateway, Device yönetimi
+    TELEMETRY = "telemetry"         # Telemetri verileri
+    
+    # Enerji yönetimi
+    ENERGY = "energy"               # EPİAŞ, Recommendation, Core Loop
+    
+    # Ödül sistemi
+    REWARDS = "rewards"             # AWX puan sistemi, Ledger
+    
+    # Faturalama
+    BILLING = "billing"             # Cüzdan, işlemler
+    
+    # Uyumluluk
+    COMPLIANCE = "compliance"       # KVKK/GDPR, Audit logs
+    
+    # Bildirimler
+    NOTIFICATIONS = "notifications" # Push, Telegram, Email
+    
+    # Dashboard
+    DASHBOARD = "dashboard"         # Analitik, raporlar
+
+
+# Modül bazlı permission'lar - her modül hangi permission'ları gerektirir
+MODULE_PERMISSIONS: dict[str, list[str]] = {
+    ModuleType.CORE.value: [
+        Permission.ORG_READ.value,
+        Permission.ORG_UPDATE.value,
+        Permission.USER_READ.value,
+        Permission.USER_CREATE.value,
+        Permission.USER_UPDATE.value,
+        Permission.ROLE_ASSIGN.value,
+    ],
+    ModuleType.ASSET_MANAGEMENT.value: [
+        Permission.ASSET_CREATE.value,
+        Permission.ASSET_READ.value,
+        Permission.ASSET_UPDATE.value,
+        Permission.ASSET_DELETE.value,
+        Permission.ZONE_CREATE.value,
+        Permission.ZONE_READ.value,
+        Permission.ZONE_UPDATE.value,
+        Permission.ZONE_DELETE.value,
+    ],
+    ModuleType.IOT.value: [
+        Permission.GATEWAY_CREATE.value,
+        Permission.GATEWAY_READ.value,
+        Permission.GATEWAY_UPDATE.value,
+        Permission.GATEWAY_DELETE.value,
+        Permission.DEVICE_CREATE.value,
+        Permission.DEVICE_READ.value,
+        Permission.DEVICE_UPDATE.value,
+        Permission.DEVICE_DELETE.value,
+        Permission.DEVICE_CONTROL.value,
+    ],
+    ModuleType.TELEMETRY.value: [
+        Permission.TELEMETRY_READ.value,
+        Permission.TELEMETRY_WRITE.value,
+    ],
+    ModuleType.ENERGY.value: [
+        Permission.ENERGY_READ.value,
+        Permission.RECOMMENDATION_READ.value,
+        Permission.RECOMMENDATION_APPROVE.value,
+    ],
+    ModuleType.REWARDS.value: [
+        Permission.REWARD_READ.value,
+        Permission.LEDGER_READ.value,
+    ],
+    ModuleType.BILLING.value: [
+        Permission.BILLING_READ.value,
+        Permission.BILLING_MANAGE.value,
+    ],
+    ModuleType.COMPLIANCE.value: [
+        Permission.AUDIT_READ.value,
+    ],
+    ModuleType.NOTIFICATIONS.value: [],  # Özel permission yok, modül aktifliği yeterli
+    ModuleType.DASHBOARD.value: [],  # Tüm read permission'ları kullanır
+}
+
+
+# Rol bazlı varsayılan yetkiler
+ROLE_PERMISSIONS: dict[str, list[str]] = {
+    RoleType.ADMIN.value: ["*"],  # Tüm yetkiler
+    RoleType.TENANT.value: [
+        # Organizasyon yönetimi (kendi org'u)
+        Permission.ORG_READ.value,
+        Permission.ORG_UPDATE.value,
+        # Kullanıcı yönetimi
+        Permission.USER_CREATE.value,
+        Permission.USER_READ.value,
+        Permission.USER_UPDATE.value,
+        Permission.USER_DELETE.value,
+        # Rol atama (kendi org'unda)
+        Permission.ROLE_ASSIGN.value,
+        Permission.PERMISSION_ASSIGN.value,
+        # Asset yönetimi
+        Permission.ASSET_CREATE.value,
+        Permission.ASSET_READ.value,
+        Permission.ASSET_UPDATE.value,
+        Permission.ASSET_DELETE.value,
+        # Zone yönetimi
+        Permission.ZONE_CREATE.value,
+        Permission.ZONE_READ.value,
+        Permission.ZONE_UPDATE.value,
+        Permission.ZONE_DELETE.value,
+        # Cihaz yönetimi
+        Permission.DEVICE_CREATE.value,
+        Permission.DEVICE_READ.value,
+        Permission.DEVICE_UPDATE.value,
+        Permission.DEVICE_DELETE.value,
+        Permission.DEVICE_CONTROL.value,
+        # Telemetri
+        Permission.TELEMETRY_READ.value,
+        # Gateway
+        Permission.GATEWAY_CREATE.value,
+        Permission.GATEWAY_READ.value,
+        Permission.GATEWAY_UPDATE.value,
+        Permission.GATEWAY_DELETE.value,
+        # Billing
+        Permission.BILLING_READ.value,
+        Permission.BILLING_MANAGE.value,
+        # Audit
+        Permission.AUDIT_READ.value,
+    ],
+    RoleType.USER.value: [
+        # Salt okunur erişim
+        Permission.ORG_READ.value,
+        Permission.USER_READ.value,
+        Permission.ASSET_READ.value,
+        Permission.ZONE_READ.value,
+        Permission.DEVICE_READ.value,
+        Permission.TELEMETRY_READ.value,
+        Permission.GATEWAY_READ.value,
+        Permission.BILLING_READ.value,
+    ],
+    RoleType.DEVICE.value: [
+        # Sadece telemetri erişimi
+        Permission.TELEMETRY_READ.value,
+        Permission.TELEMETRY_WRITE.value,
+        Permission.DEVICE_READ.value,
+        Permission.GATEWAY_READ.value,
+    ],
+}
 
 
 class User(Base):
@@ -65,11 +287,43 @@ class User(Base):
         comment="Nullable for Auth0 users",
     )
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     
     # Telegram entegrasyonu
     telegram_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
     telegram_chat_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    
+    # Adres bilgileri
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)  # İl
+    district: Mapped[str | None] = mapped_column(String(100), nullable=True)  # İlçe
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    
+    # Bildirim ayarları
+    notification_settings: Mapped[dict | None] = mapped_column(
+        JSONB, 
+        default=None, 
+        nullable=True,
+        comment="push_enabled, email_enabled, telegram_enabled, sms_enabled",
+    )
+    
+    # KVKK/GDPR onayları
+    consent_settings: Mapped[dict | None] = mapped_column(
+        JSONB,
+        default=None,
+        nullable=True,
+        comment="location, device_control, notifications, data_processing, marketing",
+    )
+    
+    # Onboarding durumu
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    onboarding_step: Mapped[int | None] = mapped_column(nullable=True, comment="Current onboarding step")
+    
+    # Firebase Push Token
+    fcm_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -128,6 +382,13 @@ class Organization(Base):
     
     wallets: Mapped[list["Wallet"]] = relationship(
         "Wallet",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    
+    modules: Mapped[list["OrganizationModule"]] = relationship(
+        "OrganizationModule",
         back_populates="organization",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -218,3 +479,50 @@ class OrganizationUser(Base):
     )
     
     role: Mapped["Role | None"] = relationship("Role", lazy="joined")
+
+
+class OrganizationModule(Base):
+    """
+    Organizasyona atanmış modüller.
+    Admin organizasyon oluştururken modülleri atar.
+    Tenant bu modüllerin yetkilerini kullanabilir.
+    """
+    __tablename__ = "organization_module"
+    
+    __table_args__ = (
+        UniqueConstraint("organization_id", "module_code", name="uq_org_module"),
+    )
+    
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    module_code: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="ModuleType enum value",
+    )
+    
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    
+    # Modül ayarları (opsiyonel)
+    settings: Mapped[dict | None] = mapped_column(JSONB, default=None, nullable=True)
+    
+    activated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    
+    # Relationships
+    organization: Mapped["Organization"] = relationship(
+        "Organization",
+        back_populates="modules",
+    )

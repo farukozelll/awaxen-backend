@@ -165,6 +165,140 @@ class TelemetryAggregation(BaseModel):
     count: int
 
 
+# ============== Gateway Pairing Schemas ==============
+
+class GatewayPairingRequest(BaseModel):
+    """
+    Gateway pairing isteği.
+    Kullanıcı gateway ekranında görünen kodu girer.
+    """
+    pairing_code: str = Field(..., min_length=6, max_length=20, examples=["ABC123"])
+    asset_id: uuid.UUID = Field(..., description="Gateway'in bağlanacağı asset")
+
+
+class GatewayPairingResponse(BaseModel):
+    """Gateway pairing yanıtı."""
+    message: str
+    gateway: GatewayResponse
+    status: str = Field(default="paired", examples=["paired"])
+
+
+class GatewayPairingCodeResponse(BaseModel):
+    """Gateway pairing kodu bilgisi."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: uuid.UUID
+    code: str
+    gateway_id: uuid.UUID | None
+    expires_at: datetime
+    used_at: datetime | None
+    is_valid: bool
+
+
+class GeneratePairingCodeRequest(BaseModel):
+    """Pairing kodu oluşturma isteği (Gateway tarafından)."""
+    serial_number: str = Field(..., min_length=1, max_length=100)
+    mac_address: str | None = None
+    firmware_version: str | None = None
+    hardware_version: str | None = None
+
+
+class GeneratePairingCodeResponse(BaseModel):
+    """Pairing kodu oluşturma yanıtı."""
+    code: str
+    expires_at: datetime
+    gateway_id: uuid.UUID
+
+
+# ============== Device Discovery Schemas ==============
+
+class DiscoveredDevice(BaseModel):
+    """Gateway tarafından keşfedilen cihaz."""
+    external_id: str = Field(..., description="HA entity_id veya device_id")
+    name: str
+    device_type: DeviceType
+    manufacturer: str | None = None
+    model: str | None = None
+    firmware_version: str | None = None
+    capabilities: list[str] = Field(default_factory=list, examples=[["switch", "power_meter"]])
+
+
+class DeviceDiscoveryRequest(BaseModel):
+    """
+    Gateway'den gelen cihaz keşif sonuçları.
+    Gateway Home Assistant'tan cihazları keşfeder ve bu endpoint'e gönderir.
+    """
+    gateway_id: uuid.UUID
+    devices: list[DiscoveredDevice] = Field(..., min_length=1)
+
+
+class DeviceDiscoveryResponse(BaseModel):
+    """Cihaz keşif yanıtı."""
+    message: str
+    discovered_count: int
+    devices: list[DiscoveredDevice]
+
+
+class DeviceSetupRequest(BaseModel):
+    """
+    Keşfedilen cihazı kurulum isteği.
+    Kullanıcı her cihaz için zone ve safety profile seçer.
+    """
+    gateway_id: uuid.UUID
+    external_id: str = Field(..., description="Keşfedilen cihazın external_id'si")
+    name: str = Field(..., min_length=1, max_length=255, examples=["Salon Prizi"])
+    zone_id: uuid.UUID = Field(..., description="Cihazın bağlanacağı zone")
+    safety_profile: str = Field(
+        default="normal",
+        description="critical/high/normal",
+        examples=["normal"]
+    )
+    controllable: bool = Field(default=True, description="Uzaktan kontrol edilebilir mi?")
+
+
+class DeviceSetupResponse(BaseModel):
+    """Cihaz kurulum yanıtı."""
+    message: str
+    device: DeviceResponse
+
+
+class BulkDeviceSetupRequest(BaseModel):
+    """
+    Birden fazla cihazı toplu kurulum.
+    Kullanıcı tüm cihazları tek seferde kurabilir.
+    """
+    gateway_id: uuid.UUID
+    devices: list[DeviceSetupRequest] = Field(..., min_length=1)
+
+
+class BulkDeviceSetupResponse(BaseModel):
+    """Toplu cihaz kurulum yanıtı."""
+    message: str
+    setup_count: int
+    devices: list[DeviceResponse]
+
+
+# ============== Device Control Schemas ==============
+
+class DeviceControlRequest(BaseModel):
+    """
+    Cihaz kontrol isteği.
+    Kullanıcı veya sistem cihazı kontrol etmek için kullanır.
+    """
+    device_id: uuid.UUID
+    action: str = Field(..., examples=["turn_on", "turn_off", "set_temperature"])
+    parameters: dict | None = Field(None, examples=[{"temperature": 22}])
+
+
+class DeviceControlResponse(BaseModel):
+    """Cihaz kontrol yanıtı."""
+    message: str
+    device_id: uuid.UUID
+    action: str
+    success: bool
+    command_id: uuid.UUID | None = Field(None, description="Oluşturulan command ID")
+
+
 # ============== MQTT Schemas ==============
 
 class MQTTMessage(BaseModel):

@@ -46,69 +46,28 @@ class CostCalculationResponse(BaseModel):
 
 
 # ============================================
-# EPİAŞ ENDPOINTS
+# EPİAŞ INTEGRATION (Bağlantı Yönetimi)
 # ============================================
+# NOT: Fiyat verileri için /api/v1/market/epias/* endpoint'lerini kullanın.
+# Bu endpoint'ler sadece bağlantı testi ve API key yönetimi içindir.
 
-@router.get("/epias/prices", response_model=EPIASPriceResponse)
-async def get_electricity_prices(
-    target_date: date | None = Query(None, description="Date to fetch prices for (default: today)"),
-    user: Auth0User = Depends(get_current_user_auth0),
-) -> EPIASPriceResponse:
-    """
-    Get day-ahead electricity prices from EPİAŞ.
-    
-    Returns hourly PTF (Piyasa Takas Fiyatı) prices in TRY/MWh.
-    """
-    service = get_epias_service()
-    prices = await service.get_day_ahead_prices(target_date)
-    avg_price = await service.get_average_price(target_date)
-    
-    return EPIASPriceResponse(
-        date=(target_date or date.today()).isoformat(),
-        prices=prices,
-        average_price=float(avg_price) if avg_price else None,
-    )
-
-
-@router.get("/epias/current-price")
-async def get_current_electricity_price(
+@router.get("/epias/status")
+async def get_epias_status(
     user: Auth0User = Depends(get_current_user_auth0),
 ) -> dict[str, Any]:
     """
-    Get current hour's electricity price.
+    EPİAŞ API bağlantı durumunu kontrol et.
+    
+    **NOT**: Fiyat verileri için `/api/v1/market/epias/prices/current` kullanın.
+    Bu endpoint sadece bağlantı testi içindir.
     """
     service = get_epias_service()
-    price = await service.get_hourly_price()
-    
-    if price is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Current price not available",
-        )
     
     return {
-        "price_per_mwh": float(price),
-        "price_per_kwh": float(price / 1000),
-        "currency": "TRY",
+        "service": "epias",
+        "status": "connected" if service else "not_configured",
+        "message": "Fiyat verileri için /api/v1/market/epias/* kullanın",
     }
-
-
-@router.post("/epias/calculate-cost", response_model=CostCalculationResponse)
-async def calculate_electricity_cost(
-    request: CostCalculationRequest,
-    user: Auth0User = Depends(get_current_user_auth0),
-) -> CostCalculationResponse:
-    """
-    Calculate electricity cost for given consumption.
-    """
-    service = get_epias_service()
-    result = await service.calculate_cost(request.consumption_kwh)
-    
-    return CostCalculationResponse(
-        consumption_kwh=result["consumption_kwh"],
-        price_per_kwh=result.get("price_per_kwh"),
-        cost=result.get("cost"),
-    )
 
 
 # ============================================

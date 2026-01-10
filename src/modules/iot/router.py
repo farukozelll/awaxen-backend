@@ -18,13 +18,25 @@ from pydantic import BaseModel, Field
 from src.modules.iot.dependencies import IoTServiceDep, TelemetryServiceDep
 from src.modules.iot.models import DeviceStatus, DeviceType, GatewayStatus
 from src.modules.iot.schemas import (
+    BulkDeviceSetupRequest,
+    BulkDeviceSetupResponse,
+    DeviceControlRequest,
+    DeviceControlResponse,
     DeviceCreate,
+    DeviceDiscoveryRequest,
+    DeviceDiscoveryResponse,
     DeviceResponse,
+    DeviceSetupRequest,
+    DeviceSetupResponse,
     DeviceUpdate,
     GatewayCreate,
+    GatewayPairingRequest,
+    GatewayPairingResponse,
     GatewayResponse,
     GatewayUpdate,
     GatewayWithDevices,
+    GeneratePairingCodeRequest,
+    GeneratePairingCodeResponse,
     TelemetryAggregation,
     TelemetryDataBatch,
     TelemetryDataCreate,
@@ -338,3 +350,220 @@ async def aggregate_telemetry(
 ) -> TelemetryAggregation | None:
     """Get aggregated telemetry data (min, max, avg, sum, count)."""
     return await service.aggregate(device_id, metric_name, start_time, end_time)
+
+
+# ============== Gateway Pairing ==============
+
+@router.post(
+    "/gateways/pairing-session",
+    response_model=GeneratePairingCodeResponse,
+    summary="Pairing Oturumu Başlat (Gateway)",
+    description="""
+**Gateway tarafından çağrılır.**
+
+Gateway ilk açıldığında bu endpoint'i çağırarak pairing kodu alır.
+Kod ekranda gösterilir ve kullanıcı bu kodu uygulamaya girer.
+
+**Akış:**
+1. Gateway açılır
+2. Gateway bu endpoint'i çağırır → Kod alır
+3. Kod ekranda gösterilir (örn: ABC123)
+4. Kullanıcı kodu uygulamaya girer
+5. Gateway asset'e bağlanır
+
+**Örnek İstek:**
+```json
+{
+  "serial_number": "SHELLY-GW-001",
+  "mac_address": "AA:BB:CC:DD:EE:FF",
+  "firmware_version": "1.0.0"
+}
+```
+    """,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_pairing_code(
+    request: GeneratePairingCodeRequest,
+    service: IoTServiceDep,
+) -> GeneratePairingCodeResponse:
+    """Gateway için pairing kodu oluştur."""
+    return await service.generate_pairing_code(request)
+
+
+@router.post(
+    "/devices/claim",
+    response_model=GatewayPairingResponse,
+    summary="Cihaz Sahiplen (User)",
+    description="""
+**Kullanıcı tarafından çağrılır.**
+
+Kullanıcı gateway ekranında görünen kodu girer ve gateway'i asset'e bağlar.
+
+**Akış:**
+1. Kullanıcı kodu girer
+2. Kod doğrulanır
+3. Gateway asset'e bağlanır
+4. Gateway status: provisioning → online
+
+**Örnek İstek:**
+```json
+{
+  "pairing_code": "ABC123",
+  "asset_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+    """,
+)
+async def verify_pairing_code(
+    request: GatewayPairingRequest,
+    service: IoTServiceDep,
+) -> GatewayPairingResponse:
+    """Pairing kodunu doğrula ve gateway'i asset'e bağla."""
+    return await service.verify_pairing_code(request)
+
+
+# ============== Device Discovery ==============
+
+@router.post(
+    "/gateways/{gateway_id}/discovery",
+    response_model=DeviceDiscoveryResponse,
+    summary="Cihaz Keşfi Sonuçları (Gateway)",
+    description="""
+**Gateway tarafından çağrılır.**
+
+Gateway Home Assistant üzerinden cihazları keşfeder ve sonuçları bu endpoint'e gönderir.
+Kullanıcı daha sonra bu cihazları kurulum ekranında görür.
+
+**Akış:**
+1. Gateway HA'dan cihazları keşfeder
+2. Bu endpoint'e gönderir
+3. Kullanıcı UI'da cihazları görür
+4. Her cihaz için zone ve safety profile seçer
+
+**Örnek İstek:**
+```json
+{
+  "gateway_id": "550e8400-e29b-41d4-a716-446655440000",
+  "devices": [
+    {
+      "external_id": "switch.salon_priz",
+      "name": "Salon Priz",
+      "device_type": "smart_plug",
+      "manufacturer": "Shelly",
+      "capabilities": ["switch", "power_meter"]
+    }
+  ]
+}
+```
+    """,
+)
+async def submit_device_discovery(
+    request: DeviceDiscoveryRequest,
+    service: IoTServiceDep,
+) -> DeviceDiscoveryResponse:
+    """Gateway'den gelen cihaz keşif sonuçlarını kaydet."""
+    return await service.submit_device_discovery(request)
+
+
+@router.post(
+    "/devices/{device_id}/configuration",
+    response_model=DeviceSetupResponse,
+    summary="Cihaz Yapılandırması (User)",
+    description="""
+**Kullanıcı tarafından çağrılır.**
+
+Keşfedilen cihazı kurulum yapar.
+Her cihaz için zone ve safety profile seçilir.
+
+**Safety Profiles:**
+- `critical` - Asla otomatik kontrol edilmez (tıbbi cihazlar, güvenlik)
+- `high` - Sadece kullanıcı onayı ile kontrol
+- `normal` - Otomatik kontrol edilebilir
+
+**Örnek İstek:**
+```json
+{
+  "gateway_id": "550e8400-e29b-41d4-a716-446655440000",
+  "external_id": "switch.salon_priz",
+  "name": "Salon Prizi",
+  "zone_id": "550e8400-e29b-41d4-a716-446655440001",
+  "safety_profile": "normal",
+  "controllable": true
+}
+```
+    """,
+    status_code=status.HTTP_201_CREATED,
+)
+async def setup_device(
+    request: DeviceSetupRequest,
+    service: IoTServiceDep,
+) -> DeviceSetupResponse:
+    """Keşfedilen cihazı kurulum yap."""
+    return await service.setup_device(request)
+
+
+@router.post(
+    "/devices/setup/bulk",
+    response_model=BulkDeviceSetupResponse,
+    summary="Toplu Cihaz Kurulumu (User)",
+    description="""
+**Kullanıcı tarafından çağrılır.**
+
+Birden fazla cihazı tek seferde kurulum yapar.
+Tüm cihazlar için zone ve safety profile seçilir.
+    """,
+    status_code=status.HTTP_201_CREATED,
+)
+async def bulk_setup_devices(
+    request: BulkDeviceSetupRequest,
+    service: IoTServiceDep,
+) -> BulkDeviceSetupResponse:
+    """Birden fazla cihazı toplu kurulum yap."""
+    return await service.bulk_setup_devices(request)
+
+
+# ============== Device Control (Manuel Müdahale) ==============
+
+@router.post(
+    "/devices/control",
+    response_model=DeviceControlResponse,
+    summary="Manuel Cihaz Kontrolü",
+    description="""
+**🎮 MANUEL MÜDAHALE** - Kullanıcı tarafından tetiklenen cihaz kontrolü.
+
+Bu endpoint kullanıcının doğrudan cihazı kontrol etmesi içindir.
+Enerji tasarrufu otomasyonu için `/api/v1/energy/commands/dispatch` kullanın.
+
+**Fark:**
+| Endpoint | Kullanım | Tetikleyen |
+|----------|----------|------------|
+| `POST /iot/devices/control` | Manuel müdahale | Kullanıcı (UI'dan) |
+| `POST /energy/commands/dispatch` | Otomasyon | Sistem (Recommendation) |
+
+**Safety Profile Kontrolü:**
+- `critical` cihazlar kontrol edilemez
+- `high` cihazlar için onay gerekir
+- `normal` cihazlar doğrudan kontrol edilebilir
+
+**Örnek İstek:**
+```json
+{
+  "device_id": "550e8400-e29b-41d4-a716-446655440000",
+  "action": "turn_off",
+  "parameters": null
+}
+```
+
+**Actions:**
+- `turn_on` - Cihazı aç
+- `turn_off` - Cihazı kapat
+- `toggle` - Durumu değiştir
+- `set_temperature` - Sıcaklık ayarla (parameters: {"temperature": 22})
+    """,
+)
+async def control_device(
+    request: DeviceControlRequest,
+    service: IoTServiceDep,
+) -> DeviceControlResponse:
+    """Cihazı kontrol et."""
+    return await service.control_device(request)

@@ -122,6 +122,24 @@ class RewardLedgerListResponse(BaseModel):
     page_size: int
 
 
+class RewardDistributeRequest(BaseModel):
+    """Internal reward distribution request."""
+    user_id: UUID
+    amount_awx: int = Field(..., gt=0, description="AWX puan miktarı (pozitif)")
+    event_type: str = Field(..., description="saving_action/daily_login/streak_bonus/referral")
+    asset_id: UUID | None = None
+    reference_type: str | None = None
+    reference_id: UUID | None = None
+    description: str | None = None
+
+
+class RewardDistributeResponse(BaseModel):
+    """Reward distribution response."""
+    message: str
+    entry: RewardLedgerResponse
+    new_balance: int
+
+
 # === Streak Schemas ===
 
 class StreakResponse(BaseModel):
@@ -139,3 +157,83 @@ class StreakResponse(BaseModel):
 class UserStreaksResponse(BaseModel):
     """All streaks for a user."""
     streaks: list[StreakResponse]
+
+
+# === EPİAŞ Price Schemas ===
+
+class EpiasPrice(BaseModel):
+    """EPİAŞ electricity price for a time slot."""
+    timestamp: datetime
+    price_try_kwh: Decimal = Field(..., description="Price in TRY per kWh")
+    is_high: bool = Field(default=False, description="Is this a high price window?")
+
+
+class EpiasPriceWindow(BaseModel):
+    """High price window information."""
+    start_time: datetime
+    end_time: datetime
+    avg_price_try_kwh: Decimal
+    peak_price_try_kwh: Decimal
+
+
+class EpiasPriceResponse(BaseModel):
+    """EPİAŞ price data response."""
+    current_price: EpiasPrice
+    next_24h: list[EpiasPrice] = Field(default_factory=list)
+    high_price_windows: list[EpiasPriceWindow] = Field(default_factory=list)
+    threshold_try_kwh: Decimal = Field(..., description="Price threshold for recommendations")
+
+
+class EpiasPriceHistoryRequest(BaseModel):
+    """Request for historical EPİAŞ prices."""
+    start_time: datetime
+    end_time: datetime
+
+
+class EpiasPriceHistoryResponse(BaseModel):
+    """Historical EPİAŞ price data."""
+    prices: list[EpiasPrice]
+    avg_price: Decimal
+    min_price: Decimal
+    max_price: Decimal
+
+
+# === Core Loop Schemas ===
+
+class RecommendationTriggerRequest(BaseModel):
+    """
+    Manuel recommendation tetikleme isteği.
+    Normalde sistem otomatik tetikler ama test için manuel de tetiklenebilir.
+    """
+    asset_id: UUID
+    reason: str = Field(default="price_high", description="price_high/anomaly/schedule")
+    force: bool = Field(default=False, description="Force even if conditions not met")
+
+
+class RecommendationTriggerResponse(BaseModel):
+    """Recommendation tetikleme yanıtı."""
+    triggered: bool
+    message: str
+    recommendation: RecommendationResponse | None = None
+
+
+class ApproveRecommendationRequest(BaseModel):
+    """Recommendation onaylama isteği."""
+    recommendation_id: UUID
+
+
+class ApproveRecommendationResponse(BaseModel):
+    """Recommendation onaylama yanıtı."""
+    message: str
+    recommendation: RecommendationResponse
+    command: CommandResponse | None = None
+
+
+class CoreLoopStatusResponse(BaseModel):
+    """Core loop durumu."""
+    asset_id: UUID
+    current_price: EpiasPrice | None = None
+    active_recommendations: int = 0
+    pending_commands: int = 0
+    total_savings_today_try: Decimal = Decimal("0")
+    total_awx_today: int = 0
