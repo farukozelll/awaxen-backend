@@ -153,14 +153,14 @@ class Gateway(Base, TenantMixin):
         "Device",
         back_populates="gateway",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Performance: Gateway may have 500+ devices
     )
     
     pairing_codes: Mapped[list["GatewayPairingCode"]] = relationship(
         "GatewayPairingCode",
         back_populates="gateway",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
 
 

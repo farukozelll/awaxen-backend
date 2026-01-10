@@ -90,7 +90,7 @@ class WeatherService:
         lang: str = "tr",
     ) -> dict[str, Any] | None:
         """
-        Get current weather conditions.
+        Get current weather conditions with Redis caching.
         
         Args:
             lat: Latitude
@@ -98,14 +98,28 @@ class WeatherService:
             lang: Language code
             
         Returns:
-            Current weather data
+            Current weather data (cached for 30 minutes)
         """
+        # Redis cache check (30 dakika TTL)
+        cache_key = f"weather:current:{lat:.2f}:{lon:.2f}:{lang}"
+        try:
+            from src.core.redis import get_redis
+            redis = await get_redis()
+            if redis:
+                import json
+                cached = await redis.get(cache_key)
+                if cached:
+                    logger.debug("Weather cache hit", cache_key=cache_key)
+                    return json.loads(cached)
+        except Exception as e:
+            logger.warning("Redis cache error", error=str(e))
+        
         data = await self._request("weather", lat=lat, lon=lon, lang=lang)
         
         if not data:
             return None
         
-        return {
+        result = {
             "location": data.get("name"),
             "temperature": data.get("main", {}).get("temp"),
             "feels_like": data.get("main", {}).get("feels_like"),
@@ -119,6 +133,18 @@ class WeatherService:
             "sunrise": data.get("sys", {}).get("sunrise"),
             "sunset": data.get("sys", {}).get("sunset"),
         }
+        
+        # Cache result for 30 minutes
+        try:
+            from src.core.redis import get_redis
+            redis = await get_redis()
+            if redis:
+                import json
+                await redis.setex(cache_key, 1800, json.dumps(result))  # 30 min TTL
+        except Exception as e:
+            logger.warning("Redis cache set error", error=str(e))
+        
+        return result
     
     async def get_forecast(
         self,
@@ -165,7 +191,7 @@ class WeatherService:
         lang: str = "tr",
     ) -> dict[str, Any] | None:
         """
-        Get current weather by city name.
+        Get current weather by city name with Redis caching.
         
         Args:
             city: City name
@@ -173,15 +199,29 @@ class WeatherService:
             lang: Language code
             
         Returns:
-            Current weather data
+            Current weather data (cached for 30 minutes)
         """
+        # Redis cache check
+        cache_key = f"weather:city:{city.lower()}:{country_code}:{lang}"
+        try:
+            from src.core.redis import get_redis
+            redis = await get_redis()
+            if redis:
+                import json
+                cached = await redis.get(cache_key)
+                if cached:
+                    logger.debug("Weather city cache hit", city=city)
+                    return json.loads(cached)
+        except Exception as e:
+            logger.warning("Redis cache error", error=str(e))
+        
         q = f"{city},{country_code}"
         data = await self._request("weather", q=q, lang=lang)
         
         if not data:
             return None
         
-        return {
+        result = {
             "location": data.get("name"),
             "country": data.get("sys", {}).get("country"),
             "temperature": data.get("main", {}).get("temp"),
@@ -190,6 +230,18 @@ class WeatherService:
             "description": data.get("weather", [{}])[0].get("description"),
             "wind_speed": data.get("wind", {}).get("speed"),
         }
+        
+        # Cache result for 30 minutes
+        try:
+            from src.core.redis import get_redis
+            redis = await get_redis()
+            if redis:
+                import json
+                await redis.setex(cache_key, 1800, json.dumps(result))
+        except Exception as e:
+            logger.warning("Redis cache set error", error=str(e))
+        
+        return result
 
 
 # Singleton instance

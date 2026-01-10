@@ -3,8 +3,9 @@ RealEstate Module - API Router
 """
 import uuid
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, status, Depends
 
+from src.modules.auth.dependencies import CurrentUser
 from src.modules.real_estate.dependencies import RealEstateServiceDep
 from src.modules.real_estate.models import AssetType
 from src.modules.real_estate.schemas import (
@@ -259,14 +260,10 @@ async def claim_handover(
     asset_id: uuid.UUID,
     data: HandoverClaim,
     service: RealEstateServiceDep,
+    current_user: CurrentUser,
 ) -> TenancyResponse:
     """Claim a handover token and become the new tenant."""
-    from src.modules.auth.dependencies import get_current_user
-    from fastapi import Depends
-    
-    # Note: In real implementation, get user_id from current_user
-    # For now, we need to pass it differently
-    _, tenancy = await service.claim_handover(data.token, uuid.uuid4())  # TODO: get real user_id
+    _, tenancy = await service.claim_handover(data.token, current_user.id)
     return TenancyResponse.model_validate(tenancy)
 
 

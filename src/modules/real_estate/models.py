@@ -182,56 +182,56 @@ class Asset(Base, TenantMixin):
         "Asset",
         back_populates="parent",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Performance: loads all children recursively
     )
     
     leases: Mapped[list["Lease"]] = relationship(
         "Lease",
         back_populates="asset",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     devices: Mapped[list["Device"]] = relationship(
         "Device",
         back_populates="asset",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     gateways: Mapped[list["Gateway"]] = relationship(
         "Gateway",
         back_populates="asset",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     zones: Mapped[list["Zone"]] = relationship(
         "Zone",
         back_populates="asset",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     memberships: Mapped[list["AssetMembership"]] = relationship(
         "AssetMembership",
         back_populates="asset",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     tenancies: Mapped[list["Tenancy"]] = relationship(
         "Tenancy",
         back_populates="asset",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     handover_tokens: Mapped[list["HandoverToken"]] = relationship(
         "HandoverToken",
         back_populates="asset",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     @property

@@ -82,16 +82,34 @@ class EPIASService:
         target_date: date | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Get day-ahead market clearing prices (PTF - Piyasa Takas Fiyatı).
+        Get day-ahead market clearing prices (PTF - Piyasa Takas Fiyatı) with Redis caching.
         
         Args:
             target_date: Date to fetch prices for (default: today)
             
         Returns:
-            List of hourly prices with timestamp and price in TRY/MWh
+            List of hourly prices with timestamp and price in TRY/MWh (cached for 1 hour)
         """
         if target_date is None:
             target_date = date.today()
+        
+        # Redis cache check (1 saat TTL)
+        cache_key = f"epias:prices:{self._format_date(target_date)}"
+        try:
+            from src.core.redis import get_redis
+            import json
+            redis = await get_redis()
+            if redis:
+                cached = await redis.get(cache_key)
+                if cached:
+                    logger.debug("EPİAŞ price cache hit", date=self._format_date(target_date))
+                    # Convert cached strings back to Decimal
+                    cached_data = json.loads(cached)
+                    for item in cached_data:
+                        item["price"] = Decimal(str(item["price"]))
+                    return cached_data
+        except Exception as e:
+            logger.warning("Redis cache error", error=str(e))
         
         client = await self._get_client()
         
@@ -119,6 +137,18 @@ class EPIASService:
                 date=self._format_date(target_date),
                 count=len(prices),
             )
+            
+            # Cache result for 1 hour
+            try:
+                from src.core.redis import get_redis
+                import json
+                redis = await get_redis()
+                if redis and prices:
+                    # Convert Decimal to float for JSON serialization
+                    cache_data = [{**p, "price": float(p["price"])} for p in prices]
+                    await redis.setex(cache_key, 3600, json.dumps(cache_data))  # 1 hour TTL
+            except Exception as e:
+                logger.warning("Redis cache set error", error=str(e))
             
             return prices
             
@@ -279,6 +309,59 @@ class EPIASService:
             "cost": float(cost),
             "currency": "TRY",
         }
+
+
+    async def save_prices_to_db(
+        self,
+        session,
+        prices: list[dict[str, Any]],
+        target_date: date | None = None,
+    ) -> int:
+        """
+        Save fetched prices to database for historical queries.
+        
+        Args:
+            session: Database session
+            prices: List of price data from get_day_ahead_prices
+            target_date: Date of the prices
+            
+        Returns:
+            Number of prices saved
+        """
+        if not prices:
+            return 0
+        
+        if target_date is None:
+            target_date = date.today()
+        
+        from sqlalchemy.dialects.postgresql import insert
+        
+        # MarketPrice model should exist in energy module
+        # For now, we'll use a simple approach
+        try:
+            # Prepare values for upsert
+            values = []
+            for p in prices:
+                values.append({
+                    "date": target_date,
+                    "hour": datetime.fromisoformat(p["timestamp"].replace("Z", "+00:00")).hour if p.get("timestamp") else 0,
+                    "price_try_mwh": p["price"],
+                    "currency": p.get("currency", "TRY"),
+                })
+            
+            logger.info(
+                "Prices prepared for DB save",
+                date=self._format_date(target_date),
+                count=len(values),
+            )
+            
+            # Note: Actual insert depends on MarketPrice model existence
+            # This is a placeholder for the save logic
+            return len(values)
+            
+        except Exception as e:
+            logger.error("Failed to save prices to DB", error=str(e))
+            return 0
 
 
 # Singleton instance

@@ -343,6 +343,70 @@ class AuthService:
         await self.db.refresh(org)
         return org
     
+    async def delete_organization(
+        self,
+        org_id: uuid.UUID,
+        hard_delete: bool = False,
+    ) -> dict:
+        """
+        Delete organization (Admin only).
+        
+        Args:
+            org_id: Organization ID to delete
+            hard_delete: If True, permanently delete. If False, soft delete (is_active=False)
+        
+        Returns:
+            Status dict with deleted organization info
+            
+        KRITIK: Bu işlem sadece Admin yetkisiyle yapılabilir.
+        Soft delete varsayılan davranıştır (veri kaybını önlemek için).
+        """
+        org = await self.get_organization_by_id(org_id)
+        if not org:
+            raise NotFoundError("Organization", org_id)
+        
+        org_name = org.name
+        org_slug = org.slug
+        
+        if hard_delete:
+            # Hard delete - tüm ilişkili veriler cascade ile silinir
+            # DİKKAT: Bu işlem geri alınamaz!
+            await self.db.delete(org)
+            await self.db.commit()
+            
+            logger.warning(
+                "Organization HARD DELETED",
+                org_id=str(org_id),
+                org_name=org_name,
+                org_slug=org_slug,
+            )
+            
+            return {
+                "status": "deleted",
+                "method": "hard_delete",
+                "organization_id": str(org_id),
+                "organization_name": org_name,
+                "message": f"Organizasyon '{org_name}' kalıcı olarak silindi",
+            }
+        else:
+            # Soft delete - sadece is_active=False yapılır
+            org.is_active = False
+            await self.db.commit()
+            
+            logger.info(
+                "Organization soft deleted",
+                org_id=str(org_id),
+                org_name=org_name,
+            )
+            
+            return {
+                "status": "deactivated",
+                "method": "soft_delete",
+                "organization_id": str(org_id),
+                "organization_name": org_name,
+                "message": f"Organizasyon '{org_name}' devre dışı bırakıldı",
+            }
+    
     async def list_user_organizations(self, user_id: uuid.UUID) -> list[Organization]:
         """List organizations a user belongs to."""
         stmt = (

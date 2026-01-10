@@ -102,10 +102,18 @@ class MQTTIngestionService:
         )
         self._running = False
         self._client: aiomqtt.Client | None = None
+        self._session_factory: Any = None
     
-    async def start(self, flush_callback: Any) -> None:
-        """Start MQTT client and begin listening."""
-        self.buffer.set_flush_callback(flush_callback)
+    async def start(self, session_factory: Any = None) -> None:
+        """
+        Start MQTT client and begin listening.
+        
+        Args:
+            session_factory: Async session factory for DB operations.
+                           Each flush creates a fresh session to avoid stale connections.
+        """
+        self._session_factory = session_factory
+        self.buffer.set_flush_callback(self._flush_to_db)
         self._running = True
         
         # Start periodic flush task
@@ -152,6 +160,28 @@ class MQTTIngestionService:
         self._running = False
         await self.buffer.flush()
         logger.info("MQTT ingestion service stopped")
+    
+    async def _flush_to_db(self, batch) -> None:
+        """
+        Flush telemetry batch to database with fresh session.
+        
+        KRITIK: Her flush işleminde yeni session oluşturulur.
+        Bu, uzun süreli MQTT bağlantılarında 'stale session' hatasını önler.
+        """
+        if not self._session_factory:
+            logger.warning("No session factory configured, skipping DB flush")
+            return
+        
+        try:
+            # Her flush'ta taze session kullan (Stale Session Fix)
+            async with self._session_factory() as session:
+                from src.modules.iot.service import TelemetryService
+                service = TelemetryService(session)
+                count = await service.insert_batch(batch)
+                logger.debug("MQTT telemetry flushed to DB", count=count)
+        except Exception as e:
+            logger.error("Failed to flush MQTT telemetry to DB", error=str(e))
+            raise
     
     async def _handle_message(self, message: aiomqtt.Message) -> None:
         """Handle incoming MQTT message."""

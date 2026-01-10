@@ -139,20 +139,21 @@ async def list_gateways(
     asset_id: uuid.UUID | None = None,
 ) -> PaginatedGatewayResponse:
     """Gateway'leri sayfalanmış olarak listeler."""
-    gateways = await service.list_gateways(status=status, asset_id=asset_id)
-    
-    # Manual pagination
-    total = len(gateways)
-    start = (page - 1) * pageSize
-    end = start + pageSize
-    paginated = gateways[start:end]
+    # DB-level pagination (Memory Bomb fix!)
+    skip = (page - 1) * pageSize
+    gateways, total = await service.list_gateways(
+        status=status,
+        asset_id=asset_id,
+        skip=skip,
+        limit=pageSize,
+    )
     
     return PaginatedGatewayResponse(
-        items=[GatewayResponse.model_validate(g) for g in paginated],
+        items=[GatewayResponse.model_validate(g) for g in gateways],
         total=total,
         page=page,
         page_size=pageSize,
-        has_more=end < total,
+        has_more=(skip + pageSize) < total,
     )
 
 
@@ -206,22 +207,44 @@ async def delete_gateway(
 
 # ============== Devices ==============
 
-@router.get("/devices", response_model=list[DeviceResponse])
+class PaginatedDeviceResponse(BaseModel):
+    """Paginated device response."""
+    items: list[DeviceResponse] = Field(default_factory=list, description="Device listesi")
+    total: int = Field(default=0, description="Toplam kayıt sayısı")
+    page: int = Field(default=1, description="Mevcut sayfa")
+    page_size: int = Field(default=20, description="Sayfa başına kayıt")
+    has_more: bool = Field(default=False, description="Daha fazla kayıt var mı")
+
+
+@router.get("/devices", response_model=PaginatedDeviceResponse)
 async def list_devices(
     service: IoTServiceDep,
+    page: int = Query(default=1, ge=1, description="Sayfa numarası"),
+    pageSize: int = Query(default=20, ge=1, le=100, alias="pageSize", description="Sayfa başına kayıt"),
     asset_id: uuid.UUID | None = None,
     gateway_id: uuid.UUID | None = None,
     device_type: DeviceType | None = None,
     status: DeviceStatus | None = None,
-) -> list[DeviceResponse]:
-    """List devices with optional filters."""
-    devices = await service.list_devices(
+) -> PaginatedDeviceResponse:
+    """List devices with optional filters and DB-level pagination."""
+    # DB-level pagination (Memory Bomb fix!)
+    skip = (page - 1) * pageSize
+    devices, total = await service.list_devices(
         asset_id=asset_id,
         gateway_id=gateway_id,
         device_type=device_type.value if device_type else None,
         status=status,
+        skip=skip,
+        limit=pageSize,
     )
-    return [DeviceResponse.model_validate(d) for d in devices]
+    
+    return PaginatedDeviceResponse(
+        items=[DeviceResponse.model_validate(d) for d in devices],
+        total=total,
+        page=page,
+        page_size=pageSize,
+        has_more=(skip + pageSize) < total,
+    )
 
 
 @router.get("/devices/{device_id}", response_model=DeviceResponse)

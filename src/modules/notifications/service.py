@@ -113,7 +113,24 @@ class NotificationService:
         # 2. Kullanıcı tercihlerini al
         preferences = await self._get_user_preferences(user_id)
         
-        # 3. FCM Push gönder
+        # 3. Sessiz saat kontrolü (CRITICAL hariç)
+        is_quiet_hours = False
+        if preferences.quiet_hours_enabled and type != NotificationType.CRITICAL:
+            is_quiet_hours = self._is_in_quiet_hours(
+                preferences.quiet_hours_start,
+                preferences.quiet_hours_end,
+            )
+            if is_quiet_hours:
+                logger.debug(
+                    "Notification suppressed due to quiet hours",
+                    user_id=str(user_id),
+                    type=type.value,
+                )
+                # Sessiz saatlerde sadece in_app kaydedilir, push/telegram gönderilmez
+                send_push = False
+                send_telegram = False
+        
+        # 4. FCM Push gönder
         if send_push and preferences.push_enabled:
             try:
                 success = await self._send_fcm_push(user_id, title, message, data)
@@ -340,6 +357,45 @@ class NotificationService:
         await self.db.refresh(prefs)
         
         return NotificationPreferenceResponse.model_validate(prefs)
+    
+    # ============== HELPER METHODS ==============
+    
+    def _is_in_quiet_hours(
+        self,
+        start_time: str | None,
+        end_time: str | None,
+    ) -> bool:
+        """
+        Check if current time is within quiet hours.
+        
+        Args:
+            start_time: Start of quiet hours (HH:MM format, e.g., "22:00")
+            end_time: End of quiet hours (HH:MM format, e.g., "08:00")
+        
+        Returns:
+            True if current time is within quiet hours
+        """
+        if not start_time or not end_time:
+            return False
+        
+        try:
+            from datetime import time
+            now = datetime.now(timezone.utc).time()
+            
+            start = datetime.strptime(start_time, "%H:%M").time()
+            end = datetime.strptime(end_time, "%H:%M").time()
+            
+            # Handle overnight quiet hours (e.g., 22:00 - 08:00)
+            if start <= end:
+                # Same day range (e.g., 14:00 - 18:00)
+                return start <= now <= end
+            else:
+                # Overnight range (e.g., 22:00 - 08:00)
+                return now >= start or now <= end
+                
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Invalid quiet hours format: {e}")
+            return False
     
     # ============== FCM PUSH (Firebase) ==============
     

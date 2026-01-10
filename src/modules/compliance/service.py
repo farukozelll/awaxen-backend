@@ -126,8 +126,10 @@ class AuditLogService:
         )
         
         self.db.add(log)
-        await self.db.commit()
-        await self.db.refresh(log)
+        # NOT: commit() burada KALDIRILDI - Side-effect commit sorunu
+        # Commit işlemini çağıran servis veya router yönetmeli
+        # Böylece audit log, ana işlemle aynı transaction içinde kalır
+        await self.db.flush()  # ID oluşması için flush yeterli
         return log
 
     async def get_logs(

@@ -503,12 +503,22 @@ class RealEstateService:
         )
         self.db.add(tenancy)
         
+        # KRITIK: Kullanıcıya asset erişim yetkisi ver (AssetMembership)
+        # Bu olmadan kullanıcı cihazları göremez/kontrol edemez
+        membership = AssetMembership(
+            asset_id=handover.asset_id,
+            user_id=user_id,
+            relation="tenant",
+            scopes=["read", "control", "maintenance"],
+        )
+        self.db.add(membership)
+        
         await self.db.commit()
         await self.db.refresh(handover)
         await self.db.refresh(tenancy)
         
         logger.info(
-            "Handover claimed",
+            "Handover claimed with membership",
             asset_id=str(handover.asset_id),
             new_tenant_id=str(user_id),
         )

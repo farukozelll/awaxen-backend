@@ -74,18 +74,30 @@ class IoTService:
         self,
         status: GatewayStatus | None = None,
         asset_id: uuid.UUID | None = None,
-    ) -> Sequence[Gateway]:
-        """List gateways with optional filters."""
-        stmt = select(Gateway).where(Gateway.organization_id == self.organization_id)
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[Sequence[Gateway], int]:
+        """List gateways with optional filters and DB-level pagination."""
+        from sqlalchemy import func
+        
+        # Base query
+        base_stmt = select(Gateway).where(Gateway.organization_id == self.organization_id)
         
         if status:
-            stmt = stmt.where(Gateway.status == status)
+            base_stmt = base_stmt.where(Gateway.status == status)
         if asset_id:
-            stmt = stmt.where(Gateway.asset_id == asset_id)
+            base_stmt = base_stmt.where(Gateway.asset_id == asset_id)
         
-        stmt = stmt.order_by(Gateway.name)
+        # Count total
+        count_stmt = select(func.count()).select_from(base_stmt.subquery())
+        total_result = await self.db.execute(count_stmt)
+        total = total_result.scalar() or 0
+        
+        # Apply pagination at DB level (NOT in Python!)
+        stmt = base_stmt.order_by(Gateway.name).offset(skip).limit(limit)
         result = await self.db.execute(stmt)
-        return result.scalars().all()
+        
+        return result.scalars().all(), total
     
     async def create_gateway(self, data: GatewayCreate) -> Gateway:
         """Create a new gateway."""
@@ -176,22 +188,34 @@ class IoTService:
         gateway_id: uuid.UUID | None = None,
         device_type: str | None = None,
         status: DeviceStatus | None = None,
-    ) -> Sequence[Device]:
-        """List devices with optional filters."""
-        stmt = select(Device).where(Device.organization_id == self.organization_id)
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[Sequence[Device], int]:
+        """List devices with optional filters and DB-level pagination."""
+        from sqlalchemy import func
+        
+        # Base query
+        base_stmt = select(Device).where(Device.organization_id == self.organization_id)
         
         if asset_id:
-            stmt = stmt.where(Device.asset_id == asset_id)
+            base_stmt = base_stmt.where(Device.asset_id == asset_id)
         if gateway_id:
-            stmt = stmt.where(Device.gateway_id == gateway_id)
+            base_stmt = base_stmt.where(Device.gateway_id == gateway_id)
         if device_type:
-            stmt = stmt.where(Device.device_type == device_type)
+            base_stmt = base_stmt.where(Device.device_type == device_type)
         if status:
-            stmt = stmt.where(Device.status == status)
+            base_stmt = base_stmt.where(Device.status == status)
         
-        stmt = stmt.order_by(Device.name)
+        # Count total
+        count_stmt = select(func.count()).select_from(base_stmt.subquery())
+        total_result = await self.db.execute(count_stmt)
+        total = total_result.scalar() or 0
+        
+        # Apply pagination at DB level (NOT in Python!)
+        stmt = base_stmt.order_by(Device.name).offset(skip).limit(limit)
         result = await self.db.execute(stmt)
-        return result.scalars().all()
+        
+        return result.scalars().all(), total
     
     async def create_device(self, data: DeviceCreate) -> Device:
         """Create a new device."""
@@ -385,28 +409,59 @@ class IoTService:
     
     # ============== Device Discovery ==============
     
-    # Geçici depolama - keşfedilen cihazlar (production'da Redis kullanılabilir)
-    _discovered_devices: dict[str, list] = {}
+    # Redis key prefix for discovered devices (multi-pod support)
+    DISCOVERY_CACHE_PREFIX = "iot:discovery:"
+    DISCOVERY_CACHE_TTL = 600  # 10 minutes
+    
+    async def _get_discovered_devices(self, gateway_id: str) -> list[dict]:
+        """Get discovered devices from Redis cache."""
+        try:
+            from src.core.redis import get_redis
+            import json
+            redis = await get_redis()
+            if redis:
+                cache_key = f"{self.DISCOVERY_CACHE_PREFIX}{gateway_id}"
+                cached = await redis.get(cache_key)
+                if cached:
+                    return json.loads(cached)
+        except Exception as e:
+            logger.warning("Redis cache read error", error=str(e))
+        return []
+    
+    async def _set_discovered_devices(self, gateway_id: str, devices: list[dict]) -> None:
+        """Store discovered devices in Redis cache."""
+        try:
+            from src.core.redis import get_redis
+            import json
+            redis = await get_redis()
+            if redis:
+                cache_key = f"{self.DISCOVERY_CACHE_PREFIX}{gateway_id}"
+                await redis.setex(cache_key, self.DISCOVERY_CACHE_TTL, json.dumps(devices))
+        except Exception as e:
+            logger.warning("Redis cache write error", error=str(e))
     
     async def submit_device_discovery(
         self,
         request: DeviceDiscoveryRequest,
     ) -> DeviceDiscoveryResponse:
         """
-        Gateway'den gelen cihaz keşif sonuçlarını kaydet.
+        Gateway'den gelen cihaz keşif sonuçlarını Redis'e kaydet.
         Kullanıcı daha sonra bu cihazları kurulum ekranında görür.
+        
+        NOT: Multi-pod ortamında çalışması için Redis kullanılır.
         """
         # Gateway'i kontrol et
         gateway = await self.get_gateway_by_id(request.gateway_id)
         if not gateway:
             raise NotFoundError("Gateway", request.gateway_id)
         
-        # Keşfedilen cihazları geçici olarak sakla
+        # Keşfedilen cihazları Redis'e kaydet (multi-pod desteği)
         gateway_key = str(request.gateway_id)
-        self._discovered_devices[gateway_key] = [d.model_dump() for d in request.devices]
+        devices_data = [d.model_dump() for d in request.devices]
+        await self._set_discovered_devices(gateway_key, devices_data)
         
         logger.info(
-            "Device discovery submitted",
+            "Device discovery submitted to Redis",
             gateway_id=str(request.gateway_id),
             device_count=len(request.devices),
         )
@@ -430,9 +485,9 @@ class IoTService:
         if not gateway:
             raise NotFoundError("Gateway", request.gateway_id)
         
-        # Keşfedilen cihazı bul
+        # Keşfedilen cihazı Redis'ten bul
         gateway_key = str(request.gateway_id)
-        discovered = self._discovered_devices.get(gateway_key, [])
+        discovered = await self._get_discovered_devices(gateway_key)
         device_info = next((d for d in discovered if d["external_id"] == request.external_id), None)
         
         if not device_info:
@@ -511,18 +566,33 @@ class IoTService:
         if not device.controllable:
             raise ValidationError("Device is not controllable")
         
-        # TODO: Gateway'e MQTT üzerinden komut gönder
-        # Şimdilik sadece log ve başarılı yanıt dön
+        # Gateway'e MQTT üzerinden komut gönder
+        # NOT: Gerçek MQTT publish için mqtt_ingestion.mqtt_service kullanılmalı
+        gateway = None
+        if device.gateway_id:
+            gateway = await self.get_gateway_by_id(device.gateway_id)
+        
+        command_id = uuid.uuid4()
+        mqtt_topic = None
+        
+        if gateway:
+            mqtt_topic = f"awaxen/gateways/{gateway.serial_number}/command"
+            # TODO: Gerçek MQTT publish
+            # from src.modules.iot.mqtt_ingestion import mqtt_service
+            # await mqtt_service.publish_command(mqtt_topic, {
+            #     "command_id": str(command_id),
+            #     "device_id": device.external_id or str(device.id),
+            #     "action": request.action,
+            #     "parameters": request.parameters,
+            # })
         
         logger.info(
             "Device control requested",
             device_id=str(device.id),
             action=request.action,
             parameters=request.parameters,
+            mqtt_topic=mqtt_topic,
         )
-        
-        # Command oluştur (Energy modülü ile entegrasyon için)
-        command_id = uuid.uuid4()
         
         return DeviceControlResponse(
             message=f"Komut gönderildi: {request.action}",
@@ -579,8 +649,11 @@ class TelemetryService:
             for reading in batch.readings
         ]
         
-        # Use PostgreSQL bulk insert
-        stmt = insert(TelemetryData).values(values)
+        # Use PostgreSQL bulk insert with ON CONFLICT DO NOTHING
+        # This prevents duplicate key errors when gateway retries sending data
+        stmt = insert(TelemetryData).values(values).on_conflict_do_nothing(
+            index_elements=["device_id", "timestamp", "metric_name"]
+        )
         await self.db.execute(stmt)
         await self.db.commit()
         

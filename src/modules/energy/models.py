@@ -170,7 +170,7 @@ class Recommendation(Base):
         "Command",
         back_populates="recommendation",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Performance: Load explicitly when needed
     )
 
 
@@ -264,7 +264,7 @@ class Command(Base):
         "CommandProof",
         back_populates="command",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Performance: Load explicitly when needed
     )
 
 

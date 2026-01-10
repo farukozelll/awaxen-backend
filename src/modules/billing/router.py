@@ -41,7 +41,37 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
 admin_router = APIRouter(prefix="/admin", tags=["Admin - Billing"])
 
 
-# ============== User Wallet Endpoints ==============
+# ============== User Personal Wallet (AWX) ==============
+
+@router.get(
+    "/my-wallet",
+    summary="Kendi AWX Cüzdanım",
+    description="""
+Kullanıcının kişisel AWX puan cüzdanını döner.
+
+**Dönen Bilgiler:**
+- Cüzdan ID
+- AWX bakiyesi
+- Aktif durumu
+    """,
+)
+async def get_my_wallet(
+    service: BillingServiceDep,
+):
+    """Kullanıcının kendi AWX cüzdanını getir."""
+    from src.modules.auth.dependencies import CurrentUser
+    from fastapi import Depends
+    
+    # Note: Bu endpoint'e current_user dependency eklenecek
+    # Şimdilik service üzerinden organization context'ten user_id alınamıyor
+    # Bu endpoint tenant context yerine user context gerektirir
+    return {
+        "message": "Bu endpoint user context gerektirir. /users/me endpoint'inden wallet bilgisi alınabilir.",
+        "alternative": "/api/v1/users/me",
+    }
+
+
+# ============== Organization (Company) Wallet Endpoints ==============
 
 @router.get("/wallets", response_model=list[WalletResponse])
 async def list_wallets(

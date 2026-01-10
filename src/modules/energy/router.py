@@ -504,13 +504,31 @@ async def approve_recommendation(
     # Create and dispatch command if device is specified
     command = None
     if recommendation.target_device_id:
-        # Get device's gateway
-        # TODO: Get gateway_id from device
-        # For now, skip command creation
-        pass
+        # Get device's gateway from IoT module
+        from sqlalchemy import select
+        from src.modules.iot.models import Device
+        
+        device_result = await db.execute(
+            select(Device).where(Device.id == recommendation.target_device_id)
+        )
+        device = device_result.scalar_one_or_none()
+        
+        if device and device.gateway_id:
+            # Create command for the device
+            command = await cmd_service.create(
+                gateway_id=device.gateway_id,
+                device_id=device.id,
+                action="turn_off",  # Default action from recommendation
+                recommendation_id=recommendation_id,
+                params=recommendation.payload.get("action_params") if recommendation.payload else None,
+            )
+            
+            # TODO: MQTT publish to gateway
+            # from src.modules.iot.mqtt_ingestion import mqtt_service
+            # await mqtt_service.publish_command(...)
     
     return ApproveRecommendationResponse(
-        message="Öneri onaylandı",
+        message="Öneri onaylandı" + (" ve komut oluşturuldu" if command else ""),
         recommendation=RecommendationResponse.model_validate(recommendation),
-        command=command,
+        command=CommandResponse.model_validate(command) if command else None,
     )

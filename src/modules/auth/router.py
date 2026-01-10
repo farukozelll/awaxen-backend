@@ -88,6 +88,10 @@ Header spoofing'e karşı korumalıdır.
 **Sonraki Girişlerde:**
 - Kullanıcı bilgileri güncellenir
 - last_login güncellenir
+
+**⚠️ ÖNERİ:** Production'da bu endpoint yerine Auth0 Post-Login Action
+veya Webhook kullanarak backend-to-backend senkronizasyon yapılmalıdır.
+Frontend'in inisiyatifine bırakmak "Zombie User" riski oluşturur.
     """,
 )
 async def sync_auth0_user(
@@ -118,6 +122,70 @@ async def sync_auth0_user(
     )
     
     return await auth_service.sync_auth0_user(sync_request)
+
+
+@router.post(
+    "/webhook/auth0",
+    summary="Auth0 Webhook (Backend-to-Backend)",
+    description="""
+**Auth0 Post-Login Action Webhook**
+
+Bu endpoint Auth0 tarafından kullanıcı login olduğunda çağrılır.
+Frontend'in inisiyatifine bırakmadan backend-to-backend senkronizasyon sağlar.
+
+**Güvenlik:**
+- `X-Auth0-Webhook-Secret` header'ı ile doğrulama yapılır
+- Bu secret Auth0 Action'da ve backend'de aynı olmalıdır
+
+**Auth0 Action Örneği:**
+```javascript
+exports.onExecutePostLogin = async (event, api) => {
+  await axios.post('https://api.awaxen.com/api/v1/auth/webhook/auth0', {
+    auth0_id: event.user.user_id,
+    email: event.user.email,
+    name: event.user.name,
+    email_verified: event.user.email_verified,
+  }, {
+    headers: { 'X-Auth0-Webhook-Secret': 'your-secret-here' }
+  });
+};
+```
+    """,
+)
+async def auth0_webhook(
+    request: Auth0SyncRequest,
+    auth_service: AuthServiceDep,
+    x_auth0_webhook_secret: str = Header(None, alias="X-Auth0-Webhook-Secret"),
+) -> dict:
+    """
+    Auth0 Post-Login Action webhook handler.
+    
+    Bu endpoint frontend'den DEĞİL, Auth0 sunucusundan çağrılır.
+    Zombie User problemini çözer.
+    """
+    from src.core.config import settings
+    
+    # Webhook secret doğrulama
+    expected_secret = getattr(settings, 'auth0_webhook_secret', None)
+    if expected_secret and x_auth0_webhook_secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook secret"
+        )
+    
+    if not request.auth0_id or not request.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="auth0_id ve email zorunludur"
+        )
+    
+    result = await auth_service.sync_auth0_user(request)
+    
+    return {
+        "status": "synced",
+        "user_id": str(result.user.id) if result.user else None,
+        "is_new": result.is_new_user,
+    }
 
 
 @router.get(
@@ -342,6 +410,35 @@ async def get_organization(
 ) -> AdminOrganizationDetailResponse:
     """Organizasyon detayı."""
     return await auth_service.get_organization_detail(org_id)
+
+
+@admin_router.delete(
+    "/organizations/{org_id}",
+    summary="Organizasyon Sil",
+    description="""
+**Sadece Admin için.**
+
+Organizasyonu siler.
+
+**Silme Türleri:**
+- `hard_delete=false` (varsayılan): Soft delete - organizasyon devre dışı bırakılır (is_active=False)
+- `hard_delete=true`: Hard delete - organizasyon ve tüm ilişkili veriler kalıcı olarak silinir
+
+**⚠️ DİKKAT:** Hard delete işlemi geri alınamaz!
+    """,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def delete_organization(
+    org_id: str,
+    auth_service: AuthServiceDep,
+    hard_delete: bool = False,
+):
+    """Organizasyonu sil (Admin only)."""
+    import uuid
+    return await auth_service.delete_organization(
+        org_id=uuid.UUID(org_id),
+        hard_delete=hard_delete,
+    )
 
 
 @admin_router.get(

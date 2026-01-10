@@ -293,12 +293,14 @@ class StreakService:
     async def update_streak(
         self, user_id: UUID, streak_type: str
     ) -> Streak:
-        """Update or create a streak."""
+        """Update or create a streak with row-level locking to prevent race conditions."""
+        # Use FOR UPDATE to lock the row and prevent race conditions
+        # when user triggers multiple actions simultaneously
         result = await self.db.execute(
             select(Streak).where(
                 Streak.user_id == user_id,
                 Streak.streak_type == streak_type,
-            )
+            ).with_for_update()
         )
         streak = result.scalar_one_or_none()
         now = datetime.now(timezone.utc)

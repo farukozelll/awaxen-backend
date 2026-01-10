@@ -7,7 +7,13 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-@celery_app.task(name="src.tasks.notifications.send_email")
+@celery_app.task(
+    name="src.tasks.notifications.send_email",
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+    max_retries=3,
+    rate_limit="50/m",  # Max 50 emails per minute (spam koruması)
+)
 def send_email(
     to: str,
     subject: str,
@@ -15,7 +21,9 @@ def send_email(
     html: str | None = None,
 ) -> dict:
     """
-    Send email notification.
+    Send email notification with rate limiting.
+    
+    Rate limit: 50 emails/minute to prevent account suspension.
     """
     logger.info("Sending email", to=to, subject=subject)
     
@@ -25,14 +33,20 @@ def send_email(
     return {"status": "sent", "to": to, "subject": subject}
 
 
-@celery_app.task(name="src.tasks.notifications.send_device_alert")
+@celery_app.task(
+    name="src.tasks.notifications.send_device_alert",
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+    max_retries=3,
+    rate_limit="100/m",  # Max 100 device alerts per minute
+)
 def send_device_alert(
     device_id: str,
     alert_type: str,
     message: str,
 ) -> dict:
     """
-    Send device alert notification.
+    Send device alert notification with rate limiting.
     """
     logger.warning(
         "Device alert",

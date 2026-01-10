@@ -4,30 +4,50 @@ Scheduled tasks for external service integrations.
 """
 from datetime import date
 
+import httpx
+
 from src.worker import celery_app
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-@celery_app.task(name="src.tasks.integrations.fetch_daily_prices")
+@celery_app.task(
+    name="src.tasks.integrations.fetch_daily_prices",
+    autoretry_for=(httpx.HTTPError, ConnectionError),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    max_retries=5,
+)
 def fetch_daily_prices() -> dict:
     """
-    Fetch and cache daily electricity prices from EPİAŞ.
+    Fetch and save daily electricity prices from EPİAŞ to database.
     Runs daily at 00:05 via Celery Beat.
+    
+    KRITIK: Fiyatlar Redis'e cache'lenir VE veritabanına kaydedilir.
+    Energy modülü bu verileri kullanarak öneri oluşturur.
     """
     import asyncio
     from src.modules.integrations.epias import get_epias_service
+    from src.core.database import async_session_maker
     
     async def _fetch():
         service = get_epias_service()
         prices = await service.get_day_ahead_prices(date.today())
         avg = await service.get_average_price(date.today())
         
+        # KRITIK: Fiyatları veritabanına kaydet (Energy modülü için)
+        saved_count = 0
+        if prices:
+            async with async_session_maker() as session:
+                saved_count = await service.save_prices_to_db(session, prices, date.today())
+                await session.commit()
+        
         logger.info(
-            "Daily prices fetched",
+            "Daily prices fetched and saved",
             date=date.today().isoformat(),
             price_count=len(prices),
+            saved_count=saved_count,
             average=float(avg) if avg else None,
         )
         
@@ -35,13 +55,19 @@ def fetch_daily_prices() -> dict:
             "status": "completed",
             "date": date.today().isoformat(),
             "price_count": len(prices),
+            "saved_count": saved_count,
             "average_price": float(avg) if avg else None,
         }
     
     return asyncio.run(_fetch())
 
 
-@celery_app.task(name="src.tasks.integrations.send_daily_report")
+@celery_app.task(
+    name="src.tasks.integrations.send_daily_report",
+    autoretry_for=(httpx.HTTPError, ConnectionError),
+    retry_backoff=True,
+    max_retries=3,
+)
 def send_daily_report(chat_id: str) -> dict:
     """
     Send daily energy report via Telegram.
@@ -76,7 +102,13 @@ def send_daily_report(chat_id: str) -> dict:
     return asyncio.run(_send())
 
 
-@celery_app.task(name="src.tasks.integrations.send_alert")
+@celery_app.task(
+    name="src.tasks.integrations.send_alert",
+    autoretry_for=(httpx.HTTPError, ConnectionError),
+    retry_backoff=True,
+    max_retries=3,
+    rate_limit="30/m",  # Max 30 alerts per minute (spam koruması)
+)
 def send_telegram_alert(
     chat_id: str,
     title: str,
@@ -84,7 +116,7 @@ def send_telegram_alert(
     level: str = "INFO",
 ) -> dict:
     """
-    Send alert notification via Telegram.
+    Send alert notification via Telegram with rate limiting.
     """
     import asyncio
     from src.modules.integrations.telegram import get_telegram_service
@@ -106,7 +138,12 @@ def send_telegram_alert(
     return asyncio.run(_send())
 
 
-@celery_app.task(name="src.tasks.integrations.check_price_threshold")
+@celery_app.task(
+    name="src.tasks.integrations.check_price_threshold",
+    autoretry_for=(httpx.HTTPError, ConnectionError),
+    retry_backoff=True,
+    max_retries=3,
+)
 def check_price_threshold(
     threshold: float,
     chat_id: str | None = None,
@@ -114,6 +151,8 @@ def check_price_threshold(
     """
     Check if current electricity price exceeds threshold.
     Sends alert if configured.
+    
+    NOT: Fiyat önce Redis cache'ten okunur, yoksa API'ye gider.
     """
     import asyncio
     from src.modules.integrations.epias import get_epias_service
