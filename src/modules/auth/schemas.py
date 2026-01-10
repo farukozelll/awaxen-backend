@@ -5,8 +5,33 @@ Always map them to Pydantic Schemas using model_validate.
 """
 import uuid
 from datetime import datetime
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+# ============== Enums ==============
+
+class OrganizationType(str, Enum):
+    """Organizasyon/Tesis tipi."""
+    VILLA = "villa"
+    HOUSE = "house"
+    APARTMENT = "apartment"
+    STUDIO = "studio"
+    FLAT_1_1 = "flat_1_1"
+    FLAT_2_1 = "flat_2_1"
+    FLAT_3_1 = "flat_3_1"
+    FLAT_4_1 = "flat_4_1"
+    OFFICE = "office"
+    FACTORY = "factory"
+    WAREHOUSE = "warehouse"
+    FARM = "farm"
+    GREENHOUSE = "greenhouse"
+    SHOP = "shop"
+    HOTEL = "hotel"
+    HOSPITAL = "hospital"
+    SCHOOL = "school"
+    OTHER = "other"
 
 
 # ============== Token Schemas ==============
@@ -73,9 +98,20 @@ class OrganizationBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
     slug: str = Field(..., min_length=2, max_length=100)
     description: str | None = None
+    organization_type: OrganizationType | None = None
+    company_size: int | None = None
     email: EmailStr | None = None
     phone: str | None = None
-    address: str | None = None
+    # Detaylı adres
+    city: str | None = None
+    district: str | None = None
+    neighborhood: str | None = None
+    street: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    address: str | None = None  # Legacy
 
 
 class OrganizationCreate(OrganizationBase):
@@ -87,10 +123,27 @@ class OrganizationUpdate(BaseModel):
     """Schema for updating an organization."""
     name: str | None = Field(None, min_length=2, max_length=255)
     description: str | None = None
+    organization_type: OrganizationType | None = None
+    company_size: int | None = None
     email: EmailStr | None = None
     phone: str | None = None
+    city: str | None = None
+    district: str | None = None
+    neighborhood: str | None = None
+    street: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     address: str | None = None
     is_active: bool | None = None
+
+
+class OrganizationWalletSummary(BaseModel):
+    """Organizasyonun wallet özeti."""
+    wallet_count: int = Field(default=0, description="Wallet sayısı")
+    balances: dict[str, str] = Field(default_factory=dict, description="Para birimi bazında bakiyeler")
+    total_balance_try: str = Field(default="0.00", description="Toplam TRY bakiyesi")
 
 
 class OrganizationResponse(OrganizationBase):
@@ -100,6 +153,14 @@ class OrganizationResponse(OrganizationBase):
     id: uuid.UUID
     is_active: bool
     created_at: datetime
+
+
+class OrganizationDetailResponse(OrganizationResponse):
+    """Organization detail with wallet summary."""
+    wallet_summary: OrganizationWalletSummary | None = Field(
+        None,
+        description="Organizasyonun wallet özeti (COMPANY wallets)"
+    )
 
 
 class OrganizationWithMembers(OrganizationResponse):
@@ -263,6 +324,7 @@ class MeResponse(BaseModel):
     - Sidebar'da modülleri gösterir
     - Onboarding tamamlanmadıysa wizard'a yönlendirir
     - Permissions'a göre UI elementlerini gösterir/gizler
+    - Wallet bakiyesini header'da gösterir
     """
     model_config = ConfigDict(from_attributes=True)
     
@@ -287,6 +349,12 @@ class MeResponse(BaseModel):
         examples=[["core", "asset_management", "iot", "energy"]]
     )
     
+    # Wallet bilgisi (AWX Puan)
+    wallet: "UserWalletInfo | None" = Field(
+        None,
+        description="Kullanıcının AWX puan cüzdanı"
+    )
+    
     # Onboarding durumu
     onboarding_completed: bool = Field(
         default=False,
@@ -301,14 +369,24 @@ class MeResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class UserWalletInfo(BaseModel):
+    """Kullanıcının AWX wallet özeti."""
+    balance: str = Field(default="0.00", description="AWX bakiyesi")
+    currency: str = Field(default="AWX", description="Para birimi")
+    has_wallet: bool = Field(default=False, description="Wallet var mı?")
+
+
 # ============== Admin Schemas ==============
 
 class CreateOrganizationWithUserRequest(BaseModel):
     """
-    Admin tarafından organizasyon ve kullanıcı birlikte oluşturma.
-    Organizasyon oluşturulur ve belirtilen kullanıcı tenant rolüyle eklenir.
+    Tab 1: Organizasyon ve ilk kullanıcı (tenant owner) birlikte oluşturma.
+    
+    Frontend akışı:
+    1. Tab 1: Bu schema ile organization + owner oluşturulur
+    2. Tab 2: OrganizationModulesUpdate ile modüller eklenir
     """
-    # Organizasyon bilgileri
+    # ===== Organizasyon bilgileri =====
     organization_name: str = Field(..., min_length=2, max_length=255, examples=["Acme Corp"])
     organization_slug: str | None = Field(
         None, 
@@ -318,24 +396,54 @@ class CreateOrganizationWithUserRequest(BaseModel):
         description="Otomatik oluşturulur eğer belirtilmezse",
         examples=["acme-corp"]
     )
+    organization_type: OrganizationType | None = Field(
+        None,
+        description="Tesis tipi (villa, apartment, factory, vb.)",
+        examples=["villa"]
+    )
+    company_size: int | None = Field(
+        None,
+        ge=0,
+        description="Çalışan sayısı veya m2 büyüklüğü",
+        examples=[100]
+    )
     organization_description: str | None = Field(None, examples=["Acme Corporation"])
     organization_email: EmailStr | None = Field(None, examples=["info@acme.com"])
     organization_phone: str | None = Field(None, examples=["+905551112233"])
-    organization_address: str | None = Field(None, examples=["Istanbul, Turkey"])
     
-    # Kullanıcı bilgileri
+    # ===== Detaylı adres (hava durumu için gerekli) =====
+    city: str | None = Field(None, description="Şehir", examples=["İstanbul"])
+    district: str | None = Field(None, description="İlçe", examples=["Kadıköy"])
+    neighborhood: str | None = Field(None, description="Mahalle", examples=["Caferağa"])
+    street: str | None = Field(None, description="Sokak/Cadde ve kapı no", examples=["Moda Cad. No:15"])
+    postal_code: str | None = Field(None, description="Posta kodu", examples=["34710"])
+    country: str = Field(default="Türkiye", description="Ülke", examples=["Türkiye"])
+    
+    # ===== Koordinatlar (hava durumu API için) =====
+    latitude: float | None = Field(None, description="Enlem", examples=[40.9833])
+    longitude: float | None = Field(None, description="Boylam", examples=[29.0333])
+    
+    # ===== İlk kullanıcı (Tenant Owner) bilgileri =====
+    user_first_name: str = Field(..., min_length=1, max_length=100, examples=["Ahmet"])
+    user_last_name: str = Field(..., min_length=1, max_length=100, examples=["Yılmaz"])
     user_email: EmailStr = Field(..., examples=["admin@acme.com"])
-    user_full_name: str | None = Field(None, examples=["Ahmet Yılmaz"])
     user_phone: str | None = Field(None, examples=["+905551112233"])
     user_role: str = Field(
         default="tenant",
-        description="Kullanıcının rolü (tenant, user, device)",
+        description="Kullanıcının rolü (varsayılan: tenant)",
         examples=["tenant"]
     )
-    user_permissions: list[str] | None = Field(
-        None,
-        description="Ek yetkiler (rol yetkilerine eklenir)",
-        examples=[["billing:manage"]]
+
+
+class OrganizationModulesUpdate(BaseModel):
+    """
+    Tab 2: Organizasyon modüllerini güncelle.
+    Tab 1'den dönen organization_id ile çağrılır.
+    """
+    modules: list[str] = Field(
+        ...,
+        description="Aktif edilecek modül kodları",
+        examples=[["core", "iot", "energy", "billing"]]
     )
 
 
@@ -594,6 +702,7 @@ class AdminOrganizationDetailResponse(BaseModel):
     device_count: int = 0
     gateway_count: int = 0
     asset_count: int = 0
+    wallet_summary: "OrganizationWalletSummary | None" = None
 
 
 class AdminUserListItem(BaseModel):
@@ -646,22 +755,6 @@ class AssignRoleToUserResponse(BaseModel):
     user_id: uuid.UUID
     role: RoleInfo
     organization_id: uuid.UUID
-
-
-class AddUserToOrgDirectRequest(BaseModel):
-    """Organizasyona doğrudan kullanıcı ekleme isteği."""
-    user_id: uuid.UUID | None = Field(None, description="Mevcut kullanıcı ID (opsiyonel)")
-    email: EmailStr = Field(..., description="Kullanıcı email")
-    full_name: str | None = None
-    role_code: str = Field(default="user", examples=["tenant", "user"])
-
-
-class AddUserToOrgDirectResponse(BaseModel):
-    """Organizasyona doğrudan kullanıcı ekleme yanıtı."""
-    message: str
-    user: AdminUserListItem
-    organization_id: uuid.UUID
-    role: str
 
 
 # Forward references

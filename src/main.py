@@ -74,7 +74,6 @@ TAGS_METADATA = [
     {"name": "Notifications", "description": "🔔 **Bildirimler** - Push, Telegram, Email"},
     # 📊 ANALYTICS & SYSTEM
     {"name": "Dashboard", "description": "📊 **Dashboard** - Özet veriler ve analitikler"},
-    {"name": "Integrations", "description": "🔗 **Entegrasyonlar** - EPİAŞ, OpenWeather, Telegram"},
     {"name": "SSE", "description": "📡 **Realtime** - Server-Sent Events"},
     {"name": "health", "description": "❤️ **Sağlık** - Sistem durumu ve metrikler"},
 ]
@@ -364,6 +363,7 @@ def _include_routers(app: FastAPI) -> None:
     from src.modules.auth.router import users_router
     from src.modules.auth.router import admin_router
     from src.modules.billing.router import router as billing_router
+    from src.modules.billing.router import admin_router as billing_admin_router
     from src.modules.iot.router import router as iot_router
     from src.modules.real_estate.router import router as real_estate_router
     from src.modules.integrations.router import router as integrations_router
@@ -393,6 +393,7 @@ def _include_routers(app: FastAPI) -> None:
         real_estate_router,
         iot_router,
         billing_router,
+        billing_admin_router,  # /api/v1/billing/admin/* - Admin wallet operations
         integrations_router,
         compliance_router,
         audit_router,     # /api/v1/audit/* - EKLENDİ!

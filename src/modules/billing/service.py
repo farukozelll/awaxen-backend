@@ -1,5 +1,9 @@
 """
 Billing Module - Business Logic Service
+
+Wallet Türleri:
+- COMPANY: Organizasyon cüzdanı (TL/USD - Fatura ödemeleri)
+- PERSONAL: Kullanıcı cüzdanı (AWX Puan - Ödül/Motivasyon)
 """
 import uuid
 from datetime import date, datetime, timezone
@@ -19,6 +23,7 @@ from src.modules.billing.models import (
     TransactionStatus,
     TransactionType,
     Wallet,
+    WalletType,
 )
 from src.modules.billing.schemas import (
     InvoiceCreate,
@@ -39,38 +44,47 @@ class BillingService:
         self.db = db
         self.organization_id = organization_id
     
-    # ============== Wallet Operations ==============
+    # ============== Organization (COMPANY) Wallet Operations ==============
     
     async def get_wallet_by_id(self, wallet_id: uuid.UUID) -> Wallet | None:
-        """Get wallet by ID within organization."""
+        """Get COMPANY wallet by ID within organization."""
         stmt = select(Wallet).where(
             Wallet.id == wallet_id,
             Wallet.organization_id == self.organization_id,
+            Wallet.wallet_type == WalletType.COMPANY,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
     
     async def get_wallet_by_currency(self, currency: str) -> Wallet | None:
-        """Get wallet by currency within organization."""
+        """Get COMPANY wallet by currency within organization."""
         stmt = select(Wallet).where(
             Wallet.organization_id == self.organization_id,
+            Wallet.wallet_type == WalletType.COMPANY,
             Wallet.currency == currency.upper(),
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
     
+    async def get_default_wallet(self) -> Wallet | None:
+        """Get default COMPANY wallet for organization (TRY currency)."""
+        return await self.get_wallet_by_currency("TRY")
+    
     async def list_wallets(self) -> Sequence[Wallet]:
-        """List all wallets for organization."""
+        """List all COMPANY wallets for organization."""
         stmt = (
             select(Wallet)
-            .where(Wallet.organization_id == self.organization_id)
+            .where(
+                Wallet.organization_id == self.organization_id,
+                Wallet.wallet_type == WalletType.COMPANY,
+            )
             .order_by(Wallet.currency)
         )
         result = await self.db.execute(stmt)
         return result.scalars().all()
     
     async def create_wallet(self, data: WalletCreate) -> Wallet:
-        """Create a new wallet."""
+        """Create a new COMPANY wallet for organization."""
         currency = data.currency.upper()
         
         existing = await self.get_wallet_by_currency(currency)
@@ -78,7 +92,9 @@ class BillingService:
             raise ConflictError(f"Wallet with currency '{currency}' already exists")
         
         wallet = Wallet(
+            wallet_type=WalletType.COMPANY,
             organization_id=self.organization_id,
+            user_id=None,
             currency=currency,
             credit_limit=data.credit_limit,
             balance=Decimal("0.00"),
@@ -88,8 +104,9 @@ class BillingService:
         await self.db.refresh(wallet)
         
         logger.info(
-            "Wallet created",
+            "Company wallet created",
             wallet_id=str(wallet.id),
+            organization_id=str(self.organization_id),
             currency=currency,
         )
         return wallet
@@ -109,15 +126,23 @@ class BillingService:
         return wallet
     
     async def top_up_wallet(self, request: TopUpRequest) -> Transaction:
-        """Add funds to wallet."""
-        wallet = await self.get_wallet_by_id(request.wallet_id)
+        """Add funds to wallet with row-level locking to prevent race conditions."""
+        # Use FOR UPDATE to lock the row and prevent race conditions
+        stmt = select(Wallet).where(
+            Wallet.id == request.wallet_id,
+            Wallet.organization_id == self.organization_id,
+            Wallet.wallet_type == WalletType.COMPANY,
+        ).with_for_update()
+        result = await self.db.execute(stmt)
+        wallet = result.scalar_one_or_none()
+        
         if not wallet:
             raise NotFoundError("Wallet", request.wallet_id)
         
         if not wallet.is_active:
             raise ValidationError("Wallet is not active")
         
-        # Update balance
+        # Update balance (now safe from race conditions)
         new_balance = wallet.balance + request.amount
         wallet.balance = new_balance
         
@@ -152,8 +177,16 @@ class BillingService:
         invoice_id: uuid.UUID | None = None,
         reference: str | None = None,
     ) -> Transaction:
-        """Deduct funds from wallet."""
-        wallet = await self.get_wallet_by_id(wallet_id)
+        """Deduct funds from wallet with row-level locking to prevent race conditions."""
+        # Use FOR UPDATE to lock the row and prevent race conditions
+        stmt = select(Wallet).where(
+            Wallet.id == wallet_id,
+            Wallet.organization_id == self.organization_id,
+            Wallet.wallet_type == WalletType.COMPANY,
+        ).with_for_update()
+        result = await self.db.execute(stmt)
+        wallet = result.scalar_one_or_none()
+        
         if not wallet:
             raise NotFoundError("Wallet", wallet_id)
         
@@ -166,7 +199,7 @@ class BillingService:
                 f"Insufficient balance. Available: {wallet.available_balance}, Required: {amount}"
             )
         
-        # Update balance
+        # Update balance (now safe from race conditions)
         new_balance = wallet.balance - amount
         wallet.balance = new_balance
         
@@ -400,3 +433,191 @@ class BillingService:
         
         logger.info("Invoice cancelled", invoice_id=str(invoice_id))
         return invoice
+    
+    # ============== User (PERSONAL) Wallet Operations ==============
+    
+    async def get_user_wallet(self, user_id: uuid.UUID, currency: str = "AWX") -> Wallet | None:
+        """Get PERSONAL wallet for a user."""
+        stmt = select(Wallet).where(
+            Wallet.user_id == user_id,
+            Wallet.wallet_type == WalletType.PERSONAL,
+            Wallet.currency == currency.upper(),
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    async def get_or_create_user_wallet(self, user_id: uuid.UUID, currency: str = "AWX") -> Wallet:
+        """Get or create PERSONAL wallet for a user."""
+        wallet = await self.get_user_wallet(user_id, currency)
+        if wallet:
+            return wallet
+        
+        # Create new personal wallet
+        wallet = Wallet(
+            wallet_type=WalletType.PERSONAL,
+            organization_id=None,
+            user_id=user_id,
+            currency=currency.upper(),
+            balance=Decimal("0.00"),
+            credit_limit=None,  # Personal wallets don't have credit limit
+        )
+        self.db.add(wallet)
+        await self.db.commit()
+        await self.db.refresh(wallet)
+        
+        logger.info(
+            "Personal wallet created",
+            wallet_id=str(wallet.id),
+            user_id=str(user_id),
+            currency=currency,
+        )
+        return wallet
+    
+    async def list_user_wallets(self, user_id: uuid.UUID) -> Sequence[Wallet]:
+        """List all PERSONAL wallets for a user."""
+        stmt = (
+            select(Wallet)
+            .where(
+                Wallet.user_id == user_id,
+                Wallet.wallet_type == WalletType.PERSONAL,
+            )
+            .order_by(Wallet.currency)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+    
+    async def add_reward_to_user(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        description: str,
+        reference: str | None = None,
+    ) -> Transaction:
+        """
+        Add AWX reward points to user's personal wallet with row-level locking.
+        
+        Bu metod Energy Core Loop'ta kullanılır:
+        - Kullanıcı enerji tasarrufu önerisini onayladığında
+        - Sistem tarafından otomatik ödül verildiğinde
+        """
+        # First ensure wallet exists
+        wallet = await self.get_or_create_user_wallet(user_id, "AWX")
+        
+        # Then lock it for update to prevent race conditions
+        stmt = select(Wallet).where(Wallet.id == wallet.id).with_for_update()
+        result = await self.db.execute(stmt)
+        wallet = result.scalar_one()
+        
+        if not wallet.is_active:
+            raise ValidationError("User wallet is not active")
+        
+        # Update balance (now safe from race conditions)
+        new_balance = wallet.balance + amount
+        wallet.balance = new_balance
+        
+        # Create reward transaction
+        transaction = Transaction(
+            wallet_id=wallet.id,
+            transaction_type=TransactionType.REWARD,
+            amount=amount,
+            balance_after=new_balance,
+            status=TransactionStatus.COMPLETED,
+            reference=reference,
+            description=description,
+        )
+        self.db.add(transaction)
+        
+        await self.db.commit()
+        await self.db.refresh(transaction)
+        
+        logger.info(
+            "Reward added to user wallet",
+            user_id=str(user_id),
+            wallet_id=str(wallet.id),
+            amount=str(amount),
+            new_balance=str(new_balance),
+        )
+        return transaction
+    
+    async def debit_user_wallet(
+        self,
+        user_id: uuid.UUID,
+        amount: Decimal,
+        description: str,
+        reference: str | None = None,
+    ) -> Transaction:
+        """
+        Deduct AWX points from user's personal wallet with row-level locking.
+        
+        Bu metod kullanıcı puan harcadığında kullanılır:
+        - Hediye çeki satın alma
+        - Marketplace'de ürün alma
+        """
+        # Use FOR UPDATE to lock the row and prevent race conditions
+        stmt = select(Wallet).where(
+            Wallet.user_id == user_id,
+            Wallet.wallet_type == WalletType.PERSONAL,
+            Wallet.currency == "AWX",
+        ).with_for_update()
+        result = await self.db.execute(stmt)
+        wallet = result.scalar_one_or_none()
+        
+        if not wallet:
+            raise NotFoundError("User wallet not found")
+        
+        if not wallet.is_active:
+            raise ValidationError("User wallet is not active")
+        
+        if wallet.balance < amount:
+            raise ValidationError(
+                f"Insufficient balance. Available: {wallet.balance}, Required: {amount}"
+            )
+        
+        # Update balance (now safe from race conditions)
+        new_balance = wallet.balance - amount
+        wallet.balance = new_balance
+        
+        # Create debit transaction
+        transaction = Transaction(
+            wallet_id=wallet.id,
+            transaction_type=TransactionType.DEBIT,
+            amount=amount,
+            balance_after=new_balance,
+            status=TransactionStatus.COMPLETED,
+            reference=reference,
+            description=description,
+        )
+        self.db.add(transaction)
+        
+        await self.db.commit()
+        await self.db.refresh(transaction)
+        
+        logger.info(
+            "Points deducted from user wallet",
+            user_id=str(user_id),
+            wallet_id=str(wallet.id),
+            amount=str(amount),
+            new_balance=str(new_balance),
+        )
+        return transaction
+    
+    async def get_user_wallet_balance(self, user_id: uuid.UUID) -> dict:
+        """Get user's AWX wallet balance summary."""
+        wallet = await self.get_user_wallet(user_id, "AWX")
+        
+        if not wallet:
+            return {
+                "user_id": str(user_id),
+                "currency": "AWX",
+                "balance": "0.00",
+                "has_wallet": False,
+            }
+        
+        return {
+            "user_id": str(user_id),
+            "wallet_id": str(wallet.id),
+            "currency": wallet.currency,
+            "balance": str(wallet.balance),
+            "is_active": wallet.is_active,
+            "has_wallet": True,
+        }

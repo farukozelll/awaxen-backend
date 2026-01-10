@@ -372,10 +372,16 @@ class AuthService:
     # ============== Auth0 Operations ==============
     
     async def get_user_by_auth0_id(self, auth0_id: str) -> User | None:
-        """Get user by Auth0 ID."""
+        """Get user by Auth0 ID with all relationships loaded."""
+        from src.modules.auth.models import OrganizationUser, Role
         stmt = (
             select(User)
-            .options(selectinload(User.organization_memberships))
+            .options(
+                selectinload(User.organization_memberships)
+                .selectinload(OrganizationUser.role),
+                selectinload(User.organization_memberships)
+                .selectinload(OrganizationUser.organization),
+            )
             .where(User.auth0_id == auth0_id)
         )
         result = await self.db.execute(stmt)
@@ -503,6 +509,8 @@ class AuthService:
     
     async def _build_me_response(self, user: User) -> MeResponse:
         """MeResponse oluştur."""
+        from src.modules.auth.schemas import UserWalletInfo
+        
         role_info = None
         permissions: list[str] = []
         org_response = None
@@ -531,6 +539,9 @@ class AuthService:
         if org_id:
             modules = await self.get_organization_modules(org_id)
         
+        # Kullanıcının AWX wallet bilgisini al
+        wallet_info = await self._get_user_wallet_info(user.id)
+        
         return MeResponse(
             id=user.id,
             auth0_id=user.auth0_id,
@@ -544,11 +555,43 @@ class AuthService:
             permissions=permissions,
             organization=org_response,
             modules=modules,
+            wallet=wallet_info,
             onboarding_completed=user.onboarding_completed,
             onboarding_step=user.onboarding_step,
             is_active=user.is_active,
             created_at=user.created_at,
         )
+    
+    async def _get_user_wallet_info(self, user_id: uuid.UUID) -> "UserWalletInfo | None":
+        """Kullanıcının AWX wallet bilgisini getir."""
+        from src.modules.auth.schemas import UserWalletInfo
+        
+        try:
+            from src.modules.billing.models import Wallet, WalletType
+            
+            stmt = select(Wallet).where(
+                Wallet.user_id == user_id,
+                Wallet.wallet_type == WalletType.PERSONAL,
+                Wallet.currency == "AWX",
+            )
+            result = await self.db.execute(stmt)
+            wallet = result.scalar_one_or_none()
+            
+            if wallet:
+                return UserWalletInfo(
+                    balance=str(wallet.balance),
+                    currency=wallet.currency,
+                    has_wallet=True,
+                )
+            
+            return UserWalletInfo(
+                balance="0.00",
+                currency="AWX",
+                has_wallet=False,
+            )
+        except Exception as e:
+            logger.warning(f"Could not get user wallet info: {e}")
+            return None
     
     async def _get_default_organization_response(self, user: User) -> OrganizationResponse | None:
         """Kullanıcının varsayılan organizasyonunu döner."""
@@ -566,8 +609,8 @@ class AuthService:
         request: CreateOrganizationWithUserRequest,
     ) -> CreateOrganizationWithUserResponse:
         """
-        Admin tarafından organizasyon ve kullanıcı birlikte oluşturma.
-        Organizasyon oluşturulur ve belirtilen kullanıcı atanan rolle eklenir.
+        Tab 1: Organizasyon ve ilk kullanıcı (tenant owner) birlikte oluşturma.
+        Organizasyon oluşturulur ve belirtilen kullanıcı tenant rolüyle eklenir.
         """
         # Slug oluştur
         slug = request.organization_slug
@@ -584,23 +627,37 @@ class AuthService:
         if existing_user:
             raise ConflictError(f"User with email {request.user_email} already exists")
         
-        # Organizasyon oluştur
+        # Organizasyon oluştur (detaylı adres ve tip bilgileriyle)
         org = Organization(
             name=request.organization_name,
             slug=slug,
             description=request.organization_description,
+            organization_type=request.organization_type.value if request.organization_type else None,
+            company_size=request.company_size,
             email=request.organization_email,
             phone=request.organization_phone,
-            address=request.organization_address,
+            # Detaylı adres
+            city=request.city,
+            district=request.district,
+            neighborhood=request.neighborhood,
+            street=request.street,
+            postal_code=request.postal_code,
+            country=request.country,
+            # Koordinatlar
+            latitude=request.latitude,
+            longitude=request.longitude,
             is_active=True,
         )
         self.db.add(org)
         await self.db.flush()
         
-        # Kullanıcı oluştur
+        # Kullanıcı oluştur (first_name + last_name)
+        full_name = f"{request.user_first_name} {request.user_last_name}"
         user = User(
             email=request.user_email,
-            full_name=request.user_full_name,
+            full_name=full_name,
+            first_name=request.user_first_name,
+            last_name=request.user_last_name,
             phone=request.user_phone,
             is_active=True,
             is_verified=False,
@@ -608,14 +665,8 @@ class AuthService:
         self.db.add(user)
         await self.db.flush()
         
-        # Rol al veya oluştur
+        # Rol al veya oluştur (varsayılan: tenant)
         role = await self._get_or_create_role(request.user_role)
-        
-        # Ek yetkiler varsa role ekle (custom permissions)
-        if request.user_permissions:
-            # Role'un permission'larını kopyala ve ek yetkileri ekle
-            all_permissions = list(set(role.permissions + request.user_permissions))
-            role.permissions = all_permissions
         
         # Kullanıcıyı organizasyona ekle
         membership = OrganizationUser(
@@ -1215,6 +1266,9 @@ class AuthService:
         # Modules
         modules = await self.get_organization_modules(org.id)
         
+        # Wallet özeti
+        wallet_summary = await self._get_organization_wallet_summary(org.id)
+        
         return AdminOrganizationDetailResponse(
             organization=OrganizationResponse.model_validate(org),
             users=users,
@@ -1222,6 +1276,7 @@ class AuthService:
             device_count=0,
             gateway_count=0,
             asset_count=0,
+            wallet_summary=wallet_summary,
         )
     
     async def list_all_users(
@@ -1308,6 +1363,230 @@ class AuthService:
             page_size=page_size,
         )
     
+    async def list_organization_users(
+        self,
+        organization_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        search: str | None = None,
+        role: str | None = None,
+        is_active: bool | None = None,
+    ):
+        """Organizasyondaki kullanıcıları listele."""
+        from sqlalchemy import func
+        from src.modules.auth.schemas import AdminUserListItem, AdminUserListResponse, RoleInfo, OrganizationResponse
+        
+        # Base query - sadece belirtilen organizasyondaki kullanıcılar
+        stmt = (
+            select(User)
+            .join(OrganizationUser)
+            .where(OrganizationUser.organization_id == organization_id)
+            .options(
+                selectinload(User.organization_memberships)
+                .selectinload(OrganizationUser.role),
+                selectinload(User.organization_memberships)
+                .selectinload(OrganizationUser.organization),
+            )
+        )
+        count_stmt = (
+            select(func.count(User.id))
+            .join(OrganizationUser)
+            .where(OrganizationUser.organization_id == organization_id)
+        )
+        
+        # Filters
+        if search:
+            stmt = stmt.where(
+                (User.email.ilike(f"%{search}%")) |
+                (User.full_name.ilike(f"%{search}%"))
+            )
+            count_stmt = count_stmt.where(
+                (User.email.ilike(f"%{search}%")) |
+                (User.full_name.ilike(f"%{search}%"))
+            )
+        
+        if role:
+            stmt = stmt.join(OrganizationUser.role).where(Role.code == role)
+            count_stmt = count_stmt.join(OrganizationUser.role).where(Role.code == role)
+        
+        if is_active is not None:
+            stmt = stmt.where(User.is_active == is_active)
+            count_stmt = count_stmt.where(User.is_active == is_active)
+        
+        # Total count
+        total_result = await self.db.execute(count_stmt)
+        total = total_result.scalar() or 0
+        
+        # Pagination
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size).order_by(User.created_at.desc())
+        
+        result = await self.db.execute(stmt)
+        users = result.scalars().all()
+        
+        # Build response
+        items = []
+        for user in users:
+            role_info = None
+            org_response = None
+            
+            # Bu organizasyondaki üyeliği bul
+            for m in user.organization_memberships:
+                if m.organization_id == organization_id:
+                    if m.role:
+                        role_info = RoleInfo(code=m.role.code, name=m.role.name)
+                    if m.organization:
+                        org_response = OrganizationResponse.model_validate(m.organization)
+                    break
+            
+            items.append(AdminUserListItem(
+                id=user.id,
+                email=user.email,
+                full_name=user.full_name,
+                phone=user.phone,
+                is_active=user.is_active,
+                created_at=user.created_at,
+                last_login=user.last_login,
+                role=role_info,
+                organization=org_response,
+            ))
+        
+        return AdminUserListResponse(
+            users=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    
+    async def get_organization_stats(self, organization_id: str):
+        """Organizasyon istatistiklerini getir (wallet bilgileri dahil)."""
+        from sqlalchemy import func
+        from datetime import datetime, timedelta
+        from decimal import Decimal
+        
+        # UUID kontrolü
+        try:
+            org_uuid = uuid.UUID(organization_id)
+        except ValueError:
+            raise NotFoundError("Invalid organization ID")
+        
+        # Organizasyon var mı?
+        org = await self.get_organization_by_id(org_uuid)
+        if not org:
+            raise NotFoundError("Organization not found")
+        
+        # Kullanıcı istatistikleri
+        total_users_stmt = (
+            select(func.count(User.id))
+            .join(OrganizationUser)
+            .where(OrganizationUser.organization_id == org_uuid)
+        )
+        
+        active_users_stmt = (
+            select(func.count(User.id))
+            .join(OrganizationUser)
+            .where(
+                OrganizationUser.organization_id == org_uuid,
+                User.is_active == True
+            )
+        )
+        
+        # Rol bazında kullanıcı dağılımı
+        role_distribution_stmt = (
+            select(Role.code, func.count(User.id))
+            .join(OrganizationUser, Role.id == OrganizationUser.role_id)
+            .join(User, User.id == OrganizationUser.user_id)
+            .where(OrganizationUser.organization_id == org_uuid)
+            .group_by(Role.code)
+        )
+        
+        # Son 30 gün aktivite
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        recent_activity_stmt = (
+            select(func.count(User.id))
+            .join(OrganizationUser)
+            .where(
+                OrganizationUser.organization_id == org_uuid,
+                User.last_login >= thirty_days_ago
+            )
+        )
+        
+        # Sorguları çalıştır
+        total_users_result = await self.db.execute(total_users_stmt)
+        active_users_result = await self.db.execute(active_users_stmt)
+        role_dist_result = await self.db.execute(role_distribution_stmt)
+        recent_activity_result = await self.db.execute(recent_activity_stmt)
+        
+        total_users = total_users_result.scalar() or 0
+        active_users = active_users_result.scalar() or 0
+        recent_activity = recent_activity_result.scalar() or 0
+        
+        # Rol dağılımı
+        role_distribution = {}
+        for row in role_dist_result:
+            role_distribution[row[0]] = row[1]
+        
+        # Wallet bilgilerini getir
+        wallet_summary = await self._get_organization_wallet_summary(org_uuid)
+        
+        return {
+            "organization_id": organization_id,
+            "organization_name": org.name,
+            "total_users": total_users,
+            "active_users": active_users,
+            "inactive_users": total_users - active_users,
+            "role_distribution": role_distribution,
+            "recent_activity_30_days": recent_activity,
+            "device_count": 0,  # TODO: Implement device counting
+            "asset_count": 0,   # TODO: Implement asset counting
+            "wallet_summary": wallet_summary,
+        }
+    
+    async def _get_organization_wallet_summary(self, org_uuid: uuid.UUID) -> dict:
+        """Organizasyonun COMPANY wallet özetini getir."""
+        from sqlalchemy import func
+        from decimal import Decimal
+        from src.modules.auth.schemas import OrganizationWalletSummary
+        
+        try:
+            from src.modules.billing.models import Wallet, WalletType
+            
+            # Sadece COMPANY wallet'ları getir
+            wallet_stmt = select(Wallet).where(
+                Wallet.organization_id == org_uuid,
+                Wallet.wallet_type == WalletType.COMPANY,
+            )
+            wallet_result = await self.db.execute(wallet_stmt)
+            wallets = wallet_result.scalars().all()
+            
+            if not wallets:
+                return OrganizationWalletSummary(
+                    wallet_count=0,
+                    balances={},
+                    total_balance_try="0.00",
+                )
+            
+            # Bakiye özeti
+            balances = {}
+            total_try = Decimal("0")
+            for w in wallets:
+                balances[w.currency] = str(w.balance)
+                if w.currency == "TRY":
+                    total_try = w.balance
+            
+            return OrganizationWalletSummary(
+                wallet_count=len(wallets),
+                balances=balances,
+                total_balance_try=str(total_try),
+            )
+        except Exception as e:
+            logger.warning(f"Could not get wallet summary: {e}")
+            return OrganizationWalletSummary(
+                wallet_count=0,
+                balances={},
+                total_balance_try="0.00",
+            )
+    
     async def list_all_roles(self):
         """Tüm rolleri listele (Admin için)."""
         from src.modules.auth.schemas import AdminRoleListResponse, RoleResponse
@@ -1371,73 +1650,4 @@ class AuthService:
             organization_id=target_org_id,
         )
     
-    async def add_user_to_organization_direct(self, org_id: str, request):
-        """Organizasyona doğrudan kullanıcı ekle (Admin için)."""
-        from src.modules.auth.schemas import AddUserToOrgDirectResponse, AdminUserListItem, RoleInfo
-        
-        org = await self.get_organization_by_id(uuid.UUID(org_id))
-        if not org:
-            raise NotFoundError("Organization not found")
-        
-        # Get or create user
-        if request.user_id:
-            user = await self.get_user_by_id(request.user_id)
-            if not user:
-                raise NotFoundError("User not found")
-        else:
-            user = await self.get_user_by_email(request.email)
-            if not user:
-                # Create new user
-                user = User(
-                    email=request.email,
-                    full_name=request.full_name,
-                    is_active=True,
-                )
-                self.db.add(user)
-                await self.db.flush()
-        
-        # Get role
-        role = await self._get_or_create_role(request.role_code)
-        
-        # Check if already member
-        existing = None
-        for m in user.organization_memberships:
-            if m.organization_id == org.id:
-                existing = m
-                break
-        
-        if existing:
-            # Update role
-            existing.role_id = role.id
-        else:
-            # Add membership
-            membership = OrganizationUser(
-                user_id=user.id,
-                organization_id=org.id,
-                role_id=role.id,
-                is_default=len(user.organization_memberships) == 0,
-                joined_at=datetime.now(timezone.utc),
-            )
-            self.db.add(membership)
-        
-        await self.db.commit()
-        await self.db.refresh(user)
-        
-        role_info = RoleInfo(code=role.code, name=role.name)
-        
-        return AddUserToOrgDirectResponse(
-            message=f"Kullanıcı organizasyona eklendi",
-            user=AdminUserListItem(
-                id=user.id,
-                email=user.email,
-                full_name=user.full_name,
-                phone=user.phone,
-                is_active=user.is_active,
-                created_at=user.created_at,
-                last_login=user.last_login,
-                role=role_info,
-                organization=None,
-            ),
-            organization_id=org.id,
-            role=request.role_code,
-        )
+    

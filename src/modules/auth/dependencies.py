@@ -254,3 +254,9 @@ CurrentSuperuser = Annotated[User, Depends(get_current_superuser)]
 TenantContextDep = Annotated[TenantContext, Depends(get_tenant_context)]
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 Auth0UserDep = Annotated[Auth0User, Depends(get_current_user_auth0)]
+
+
+# Database session dependency (for admin endpoints)
+async def get_db_session(db: Annotated[AsyncSession, Depends(get_db)]) -> AsyncSession:
+    """Get database session for direct queries."""
+    return db

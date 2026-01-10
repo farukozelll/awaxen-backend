@@ -1,6 +1,13 @@
 """
 Billing Module - Database Models
-Wallets, Transactions, and Invoices for multi-tenant billing.
+
+Wallet Türleri:
+- COMPANY: Organizasyon cüzdanı (TL/USD - Fatura ödemeleri)
+- PERSONAL: Kullanıcı cüzdanı (AWX Puan - Ödül/Motivasyon)
+
+İlişkiler:
+- COMPANY wallet -> organization_id (FK)
+- PERSONAL wallet -> user_id (FK)
 """
 import uuid
 from datetime import date, datetime
@@ -10,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -25,15 +33,23 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.models import Base, TenantMixin
 
 if TYPE_CHECKING:
-    from src.modules.auth.models import Organization
+    from src.modules.auth.models import Organization, User
+
+
+class WalletType(str, Enum):
+    """Wallet type enumeration."""
+    COMPANY = "company"      # Organizasyon cüzdanı (TL/USD - Fatura)
+    PERSONAL = "personal"    # Kullanıcı cüzdanı (AWX Puan - Ödül)
 
 
 class TransactionType(str, Enum):
     """Transaction type enumeration."""
-    CREDIT = "credit"           # Money added to wallet
-    DEBIT = "debit"             # Money deducted from wallet
+    CREDIT = "credit"           # Money/points added to wallet
+    DEBIT = "debit"             # Money/points deducted from wallet
     REFUND = "refund"           # Refund to wallet
     ADJUSTMENT = "adjustment"   # Manual adjustment
+    REWARD = "reward"           # AWX reward for user actions
+    TRANSFER = "transfer"       # Transfer between wallets
 
 
 class TransactionStatus(str, Enum):
@@ -54,16 +70,80 @@ class InvoiceStatus(str, Enum):
     REFUNDED = "refunded"
 
 
-class Wallet(Base, TenantMixin):
+class Wallet(Base):
     """
     Wallet model.
-    Each organization has one or more wallets for different currencies.
+    
+    İki tip cüzdan vardır:
+    1. COMPANY (Organizasyon Cüzdanı):
+       - Sahibi: Organization
+       - Para birimi: TL, USD, EUR
+       - Amaç: Fatura ödemeleri, abonelik ücretleri
+       
+    2. PERSONAL (Kullanıcı Cüzdanı):
+       - Sahibi: User
+       - Para birimi: AWX (Puan)
+       - Amaç: Ödül puanları, motivasyon sistemi
+    
+    Constraint: wallet_type'a göre organization_id veya user_id dolu olmalı.
     """
     __tablename__ = "wallet"
     
     __table_args__ = (
-        UniqueConstraint("organization_id", "currency", name="uq_wallet_org_currency"),
+        # Organizasyon başına currency unique (COMPANY wallet için)
+        UniqueConstraint(
+            "organization_id", "currency", 
+            name="uq_wallet_org_currency",
+        ),
+        # Kullanıcı başına currency unique (PERSONAL wallet için)
+        UniqueConstraint(
+            "user_id", "currency",
+            name="uq_wallet_user_currency",
+        ),
+        # wallet_type'a göre doğru FK dolu olmalı
+        CheckConstraint(
+            """
+            (wallet_type = 'company' AND organization_id IS NOT NULL AND user_id IS NULL)
+            OR
+            (wallet_type = 'personal' AND user_id IS NOT NULL)
+            """,
+            name="ck_wallet_owner",
+        ),
         Index("ix_wallet_org", "organization_id"),
+        Index("ix_wallet_user", "user_id"),
+        Index("ix_wallet_type", "wallet_type"),
+    )
+    
+    # Primary Key (Base'den geliyor)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    
+    # Wallet Type
+    wallet_type: Mapped[WalletType] = mapped_column(
+        String(20),
+        default=WalletType.COMPANY,
+        nullable=False,
+        index=True,
+        comment="company=Organizasyon, personal=Kullanıcı",
+    )
+    
+    # Owner: Organization (COMPANY wallet için)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Owner: User (PERSONAL wallet için)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     
     # Balance
@@ -73,7 +153,7 @@ class Wallet(Base, TenantMixin):
         nullable=False,
     )
     
-    # Currency
+    # Currency (TRY, USD, EUR for COMPANY; AWX for PERSONAL)
     currency: Mapped[str] = mapped_column(
         String(3),
         default="TRY",
@@ -83,32 +163,62 @@ class Wallet(Base, TenantMixin):
     # Status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     
-    # Credit limit (optional)
+    # Credit limit (only for COMPANY wallets)
     credit_limit: Mapped[Decimal | None] = mapped_column(
         Numeric(18, 2),
         nullable=True,
-        comment="Maximum negative balance allowed",
+        comment="Maximum negative balance allowed (only for COMPANY wallets)",
+    )
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        onupdate=datetime.utcnow,
+        nullable=True,
     )
     
     # Relationships
-    organization: Mapped["Organization"] = relationship(
+    organization: Mapped["Organization | None"] = relationship(
         "Organization",
         back_populates="wallets",
+        foreign_keys=[organization_id],
+    )
+    
+    user: Mapped["User | None"] = relationship(
+        "User",
+        back_populates="wallets",
+        foreign_keys=[user_id],
     )
     
     transactions: Mapped[list["Transaction"]] = relationship(
         "Transaction",
         back_populates="wallet",
         cascade="all, delete-orphan",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Performance issue: loads ALL transactions on every wallet query
+        # Use explicit selectinload() in service when needed with pagination
     )
     
     @property
     def available_balance(self) -> Decimal:
         """Get available balance including credit limit."""
-        if self.credit_limit:
+        if self.credit_limit and self.wallet_type == WalletType.COMPANY:
             return self.balance + self.credit_limit
         return self.balance
+    
+    @property
+    def owner_id(self) -> uuid.UUID:
+        """Get owner ID (organization or user)."""
+        return self.organization_id if self.wallet_type == WalletType.COMPANY else self.user_id
+    
+    @property
+    def owner_type(self) -> str:
+        """Get owner type string."""
+        return "organization" if self.wallet_type == WalletType.COMPANY else "user"
 
 
 class Transaction(Base):
@@ -284,7 +394,7 @@ class Invoice(Base, TenantMixin):
     transactions: Mapped[list["Transaction"]] = relationship(
         "Transaction",
         back_populates="invoice",
-        lazy="selectin",
+        # lazy="selectin" REMOVED - Load explicitly when needed
     )
     
     @property

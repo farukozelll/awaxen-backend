@@ -35,6 +35,31 @@ class RoleType(str, Enum):
     DEVICE = "device"    # Telemetri erişimi
 
 
+class OrganizationType(str, Enum):
+    """
+    Organizasyon/Tesis tipi.
+    Hava durumu ve enerji hesaplamaları için önemli.
+    """
+    VILLA = "villa"                     # Villa
+    HOUSE = "house"                     # Müstakil ev
+    APARTMENT = "apartment"             # Apartman dairesi
+    STUDIO = "studio"                   # Stüdyo daire (1+0)
+    FLAT_1_1 = "flat_1_1"              # 1+1 daire
+    FLAT_2_1 = "flat_2_1"              # 2+1 daire
+    FLAT_3_1 = "flat_3_1"              # 3+1 daire
+    FLAT_4_1 = "flat_4_1"              # 4+1 ve üzeri
+    OFFICE = "office"                   # Ofis
+    FACTORY = "factory"                 # Fabrika
+    WAREHOUSE = "warehouse"             # Depo
+    FARM = "farm"                       # Tarla/Çiftlik
+    GREENHOUSE = "greenhouse"           # Sera
+    SHOP = "shop"                       # Dükkan/Mağaza
+    HOTEL = "hotel"                     # Otel
+    HOSPITAL = "hospital"               # Hastane
+    SCHOOL = "school"                   # Okul
+    OTHER = "other"                     # Diğer
+
+
 class Permission(str, Enum):
     """
     Sistem genelinde tanımlı yetkiler.
@@ -317,6 +342,28 @@ class User(Base):
         nullable=True,
         comment="location, device_control, notifications, data_processing, marketing",
     )
+    kvkk_accepted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="KVKK aydınlatma metni onayı",
+    )
+    kvkk_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="KVKK onay tarihi",
+    )
+    marketing_consent: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Pazarlama iletişimi onayı",
+    )
+    marketing_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Pazarlama onay tarihi",
+    )
     
     # Onboarding durumu
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -338,12 +385,23 @@ class User(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    
+    # User wallets (PERSONAL wallets - AWX Puan)
+    wallets: Mapped[list["Wallet"]] = relationship(
+        "Wallet",
+        back_populates="user",
+        foreign_keys="Wallet.user_id",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class Organization(Base):
     """
     Organization (Tenant) model.
     Multi-tenant isolation is based on organization_id.
+    
+    Detaylı adres bilgisi hava durumu ve enerji hesaplamaları için gerekli.
     """
     __tablename__ = "organization"
     
@@ -356,9 +414,65 @@ class Organization(Base):
     )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     
+    # Organization type and size
+    organization_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="villa, house, apartment, flat_1_1, factory, etc.",
+    )
+    company_size: Mapped[int | None] = mapped_column(
+        nullable=True,
+        default=0,
+        comment="Çalışan sayısı veya m2 büyüklüğü",
+    )
+    
     # Contact info
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    
+    # Detailed address (for weather API)
+    city: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Şehir (İstanbul, Ankara, vb.)",
+    )
+    district: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="İlçe (Kadıköy, Çankaya, vb.)",
+    )
+    neighborhood: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Mahalle",
+    )
+    street: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Sokak/Cadde ve kapı no",
+    )
+    postal_code: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Posta kodu",
+    )
+    country: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        default="Türkiye",
+    )
+    
+    # Coordinates (for weather API)
+    latitude: Mapped[float | None] = mapped_column(
+        nullable=True,
+        comment="Enlem koordinatı",
+    )
+    longitude: Mapped[float | None] = mapped_column(
+        nullable=True,
+        comment="Boylam koordinatı",
+    )
+    
+    # Legacy address field (deprecated, use detailed fields)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     
     # Settings
@@ -393,6 +507,12 @@ class Organization(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    
+    @property
+    def full_address(self) -> str:
+        """Tam adres string'i oluştur."""
+        parts = [self.street, self.neighborhood, self.district, self.city, self.country]
+        return ", ".join(p for p in parts if p)
 
 
 class Role(Base):

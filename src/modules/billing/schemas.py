@@ -1,5 +1,9 @@
 """
 Billing Module - Pydantic Schemas (DTOs)
+
+Wallet Türleri:
+- COMPANY: Organizasyon cüzdanı (TL/USD - Fatura ödemeleri)
+- PERSONAL: Kullanıcı cüzdanı (AWX Puan - Ödül/Motivasyon)
 """
 import uuid
 from datetime import date, datetime
@@ -7,7 +11,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.modules.billing.models import InvoiceStatus, TransactionStatus, TransactionType
+from src.modules.billing.models import InvoiceStatus, TransactionStatus, TransactionType, WalletType
 
 
 # ============== Wallet Schemas ==============
@@ -19,7 +23,7 @@ class WalletBase(BaseModel):
 
 
 class WalletCreate(WalletBase):
-    """Schema for creating a wallet."""
+    """Schema for creating a COMPANY wallet."""
     pass
 
 
@@ -34,16 +38,40 @@ class WalletResponse(WalletBase):
     model_config = ConfigDict(from_attributes=True)
     
     id: uuid.UUID
-    organization_id: uuid.UUID
+    wallet_type: WalletType = WalletType.COMPANY
+    organization_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
     balance: Decimal
     is_active: bool
     created_at: datetime
-    updated_at: datetime
+    updated_at: datetime | None = None
 
 
 class WalletWithTransactions(WalletResponse):
     """Wallet with recent transactions."""
     transactions: list["TransactionResponse"] = []
+
+
+# ============== User Wallet Schemas ==============
+
+class UserWalletResponse(BaseModel):
+    """User's personal wallet response."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    user_id: uuid.UUID
+    wallet_id: uuid.UUID | None = None
+    currency: str = "AWX"
+    balance: str = "0.00"
+    is_active: bool = True
+    has_wallet: bool = False
+
+
+class RewardRequest(BaseModel):
+    """Request to add reward to user wallet."""
+    user_id: uuid.UUID
+    amount: Decimal = Field(..., gt=0)
+    description: str
+    reference: str | None = None
 
 
 # ============== Transaction Schemas ==============
