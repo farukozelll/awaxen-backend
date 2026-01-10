@@ -376,7 +376,42 @@ class User(Base):
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     
+    # User status for lifecycle management
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="active",
+        comment="active, suspended, banned, pending",
+    )
+    
+    # Login tracking (Güvenlik denetimi için)
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_ip: Mapped[str | None] = mapped_column(
+        String(45),
+        nullable=True,
+        comment="Son giriş IP adresi (IPv6 destekli)",
+    )
+    last_login_user_agent: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Son giriş tarayıcı bilgisi",
+    )
+    
+    # MFA status
+    mfa_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="İki faktörlü doğrulama aktif mi",
+    )
+    
+    # User preferences (Dil, Tema, vb.)
+    preferences: Mapped[dict | None] = mapped_column(
+        JSONB,
+        default=None,
+        nullable=True,
+        comment="language, theme, timezone, date_format",
+    )
     
     # Relationships
     organization_memberships: Mapped[list["OrganizationUser"]] = relationship(
@@ -474,6 +509,54 @@ class Organization(Base):
     
     # Legacy address field (deprecated, use detailed fields)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Billing/Tax info (Fatura kesebilmek için)
+    tax_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Vergi numarası",
+    )
+    tax_office: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Vergi dairesi",
+    )
+    billing_email: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Fatura e-posta adresi",
+    )
+    billing_address: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Fatura adresi",
+    )
+    
+    # Subscription tier/plan
+    tier: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="free",
+        comment="free, starter, pro, enterprise",
+    )
+    
+    # Organization status (for lifecycle management)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="active",
+        comment="active, suspended, pending, deleted",
+    )
+    suspended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Askıya alınma tarihi",
+    )
+    suspended_reason: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Askıya alma nedeni",
+    )
     
     # Settings
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

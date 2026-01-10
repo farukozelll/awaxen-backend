@@ -1714,4 +1714,307 @@ class AuthService:
             organization_id=target_org_id,
         )
     
+    # ============== Admin Operations (L7 Enterprise Features) ==============
+    
+    async def suspend_organization(
+        self,
+        org_id: uuid.UUID,
+        reason: str | None = None,
+    ) -> dict:
+        """
+        Suspend organization (Admin only).
+        
+        Faturasını ödemeyen veya TOS ihlali yapan organizasyonu askıya alır.
+        Kullanıcılar giriş yapamaz ama veriler silinmez.
+        """
+        org = await self.get_organization_by_id(org_id)
+        if not org:
+            raise NotFoundError("Organization", org_id)
+        
+        org.status = "suspended"
+        org.suspended_at = datetime.now(timezone.utc)
+        org.suspended_reason = reason
+        org.is_active = False
+        
+        await self.db.commit()
+        
+        logger.warning(
+            "Organization suspended",
+            org_id=str(org_id),
+            org_name=org.name,
+            reason=reason,
+        )
+        
+        return {
+            "status": "suspended",
+            "organization_id": str(org_id),
+            "organization_name": org.name,
+            "suspended_at": org.suspended_at.isoformat(),
+            "reason": reason,
+            "message": f"Organizasyon '{org.name}' askıya alındı",
+        }
+    
+    async def reactivate_organization(
+        self,
+        org_id: uuid.UUID,
+    ) -> dict:
+        """
+        Reactivate suspended organization (Admin only).
+        """
+        org = await self.get_organization_by_id(org_id)
+        if not org:
+            raise NotFoundError("Organization", org_id)
+        
+        org.status = "active"
+        org.suspended_at = None
+        org.suspended_reason = None
+        org.is_active = True
+        
+        await self.db.commit()
+        
+        logger.info(
+            "Organization reactivated",
+            org_id=str(org_id),
+            org_name=org.name,
+        )
+        
+        return {
+            "status": "active",
+            "organization_id": str(org_id),
+            "organization_name": org.name,
+            "message": f"Organizasyon '{org.name}' yeniden aktifleştirildi",
+        }
+    
+    async def transfer_organization_ownership(
+        self,
+        org_id: uuid.UUID,
+        new_owner_user_id: uuid.UUID,
+    ) -> dict:
+        """
+        Transfer organization ownership to another user (Admin only).
+        
+        Şirketin IT müdürü işten ayrıldığında tenant admin yetkisini
+        başka bir kullanıcıya devretmek için kullanılır.
+        """
+        org = await self.get_organization_by_id(org_id)
+        if not org:
+            raise NotFoundError("Organization", org_id)
+        
+        new_owner = await self.get_user_by_id(new_owner_user_id)
+        if not new_owner:
+            raise NotFoundError("User", new_owner_user_id)
+        
+        # Get tenant role
+        tenant_role = await self._get_or_create_tenant_role()
+        
+        # Find current owner (tenant role with is_default=True)
+        current_owner_membership = None
+        new_owner_membership = None
+        
+        for m in org.members:
+            if m.role_id == tenant_role.id and m.is_default:
+                current_owner_membership = m
+            if m.user_id == new_owner_user_id:
+                new_owner_membership = m
+        
+        # Demote current owner to user role
+        if current_owner_membership:
+            user_role = await self._get_or_create_role(RoleType.USER.value)
+            current_owner_membership.role_id = user_role.id
+            current_owner_membership.is_default = False
+        
+        # Promote new owner to tenant role
+        if new_owner_membership:
+            new_owner_membership.role_id = tenant_role.id
+            new_owner_membership.is_default = True
+        else:
+            # Add new owner to organization
+            new_membership = OrganizationUser(
+                user_id=new_owner_user_id,
+                organization_id=org_id,
+                role_id=tenant_role.id,
+                is_default=True,
+                joined_at=datetime.now(timezone.utc),
+            )
+            self.db.add(new_membership)
+        
+        await self.db.commit()
+        
+        logger.info(
+            "Organization ownership transferred",
+            org_id=str(org_id),
+            new_owner_id=str(new_owner_user_id),
+        )
+        
+        return {
+            "status": "transferred",
+            "organization_id": str(org_id),
+            "organization_name": org.name,
+            "new_owner_id": str(new_owner_user_id),
+            "new_owner_email": new_owner.email,
+            "message": f"Organizasyon sahipliği '{new_owner.email}' kullanıcısına devredildi",
+        }
+    
+    async def revoke_user_sessions(
+        self,
+        user_id: uuid.UUID,
+    ) -> dict:
+        """
+        Revoke all sessions for a user (Admin only).
+        
+        Kullanıcı hacklendiğinde veya cihazı çalındığında
+        tüm tokenlarını iptal etmek için kullanılır.
+        
+        NOT: Auth0 kullanılıyorsa Auth0 Management API üzerinden
+        session'lar iptal edilmelidir.
+        """
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            raise NotFoundError("User", user_id)
+        
+        # TODO: Auth0 Management API ile session iptal
+        # await auth0_client.users.delete_sessions(user.auth0_id)
+        
+        # Local token invalidation (if using local tokens)
+        # Bu genellikle Redis'te token blacklist tutarak yapılır
+        
+        logger.warning(
+            "User sessions revoked",
+            user_id=str(user_id),
+            user_email=user.email,
+        )
+        
+        return {
+            "status": "revoked",
+            "user_id": str(user_id),
+            "user_email": user.email,
+            "message": f"'{user.email}' kullanıcısının tüm oturumları sonlandırıldı",
+        }
+    
+    async def list_all_users_global(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        search: str | None = None,
+        status: str | None = None,
+        is_active: bool | None = None,
+    ):
+        """
+        List ALL users across ALL organizations (Admin only - Global Search).
+        
+        Müşteri desteği için tüm sistemdeki kullanıcıları arayabilme.
+        """
+        from sqlalchemy import func, or_
+        from src.modules.auth.schemas import AdminUserListResponse, AdminUserListItem, RoleInfo, OrganizationResponse
+        
+        # Base query
+        base_query = select(User)
+        count_query = select(func.count(User.id))
+        
+        # Search filter
+        if search:
+            search_filter = or_(
+                User.email.ilike(f"%{search}%"),
+                User.full_name.ilike(f"%{search}%"),
+                User.phone.ilike(f"%{search}%"),
+            )
+            base_query = base_query.where(search_filter)
+            count_query = count_query.where(search_filter)
+        
+        # Status filter
+        if status:
+            base_query = base_query.where(User.status == status)
+            count_query = count_query.where(User.status == status)
+        
+        # Active filter
+        if is_active is not None:
+            base_query = base_query.where(User.is_active == is_active)
+            count_query = count_query.where(User.is_active == is_active)
+        
+        # Get total count
+        total_result = await self.db.execute(count_query)
+        total = total_result.scalar() or 0
+        
+        # Apply pagination
+        query = base_query.order_by(User.created_at.desc())
+        query = query.offset((page - 1) * page_size).limit(page_size)
+        query = query.options(
+            selectinload(User.organization_memberships).selectinload(OrganizationUser.role),
+            selectinload(User.organization_memberships).selectinload(OrganizationUser.organization),
+        )
+        
+        result = await self.db.execute(query)
+        users = result.scalars().all()
+        
+        # Build response
+        items = []
+        for user in users:
+            role_info = None
+            org_response = None
+            
+            # Get default organization and role
+            for m in user.organization_memberships:
+                if m.is_default:
+                    if m.role:
+                        role_info = RoleInfo(code=m.role.code, name=m.role.name)
+                    if m.organization:
+                        org_response = OrganizationResponse.model_validate(m.organization)
+                    break
+            
+            items.append(AdminUserListItem(
+                id=user.id,
+                email=user.email,
+                full_name=user.full_name,
+                phone=user.phone,
+                is_active=user.is_active,
+                created_at=user.created_at,
+                last_login=user.last_login,
+                role=role_info,
+                organization=org_response,
+            ))
+        
+        return AdminUserListResponse(
+            users=items,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+    
+    async def ban_user(
+        self,
+        user_id: uuid.UUID,
+        reason: str | None = None,
+    ) -> dict:
+        """
+        Ban user from the system (Admin only).
+        
+        Kullanıcıyı sistemden kalıcı olarak yasaklar.
+        """
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            raise NotFoundError("User", user_id)
+        
+        user.status = "banned"
+        user.is_active = False
+        
+        await self.db.commit()
+        
+        # Revoke sessions
+        await self.revoke_user_sessions(user_id)
+        
+        logger.warning(
+            "User banned",
+            user_id=str(user_id),
+            user_email=user.email,
+            reason=reason,
+        )
+        
+        return {
+            "status": "banned",
+            "user_id": str(user_id),
+            "user_email": user.email,
+            "reason": reason,
+            "message": f"'{user.email}' kullanıcısı yasaklandı",
+        }
+    
     

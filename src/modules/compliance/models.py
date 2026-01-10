@@ -149,12 +149,29 @@ class AuditLog(Base):
         default=dict,
     )
     
+    # Change tracking (KVKK ve güvenlik için kritik)
+    changes: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+        comment="{'old': {...}, 'new': {...}} - Değişiklik öncesi ve sonrası",
+    )
+    
     ip_address: Mapped[str | None] = mapped_column(
         String(45),
         nullable=True,
+        comment="İstek IP adresi (IPv6 destekli)",
     )
     
     user_agent: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
+        comment="Tarayıcı/Client bilgisi",
+    )
+    
+    # Request context
+    request_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        comment="Correlation ID for request tracing",
     )

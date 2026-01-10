@@ -580,3 +580,163 @@ async def assign_role_to_user(
 async def list_roles(auth_service: AuthServiceDep) -> AdminRoleListResponse:
     """Rolleri listele."""
     return await auth_service.list_all_roles()
+
+
+# ============== L7 Enterprise Admin Endpoints ==============
+
+@admin_router.patch(
+    "/organizations/{org_id}/suspend",
+    summary="Organizasyonu Askıya Al",
+    description="""
+**Sadece Admin için.**
+
+Organizasyonu askıya alır. Kullanıcılar giriş yapamaz ama veriler silinmez.
+
+**Kullanım Senaryoları:**
+- Faturasını ödemeyen müşteri
+- TOS (Kullanım Şartları) ihlali
+- Güvenlik soruşturması
+    """,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def suspend_organization(
+    org_id: str,
+    auth_service: AuthServiceDep,
+    reason: str | None = None,
+):
+    """Organizasyonu askıya al."""
+    import uuid
+    return await auth_service.suspend_organization(
+        org_id=uuid.UUID(org_id),
+        reason=reason,
+    )
+
+
+@admin_router.patch(
+    "/organizations/{org_id}/reactivate",
+    summary="Organizasyonu Yeniden Aktifleştir",
+    description="""
+**Sadece Admin için.**
+
+Askıya alınmış organizasyonu yeniden aktifleştirir.
+    """,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def reactivate_organization(
+    org_id: str,
+    auth_service: AuthServiceDep,
+):
+    """Organizasyonu yeniden aktifleştir."""
+    import uuid
+    return await auth_service.reactivate_organization(
+        org_id=uuid.UUID(org_id),
+    )
+
+
+@admin_router.post(
+    "/organizations/{org_id}/transfer-ownership",
+    summary="Organizasyon Sahipliğini Devret",
+    description="""
+**Sadece Admin için.**
+
+Organizasyon sahipliğini (Tenant Admin yetkisini) başka bir kullanıcıya devreder.
+
+**Kullanım Senaryoları:**
+- Şirketin IT müdürü işten ayrıldı
+- Organizasyon satıldı/devredildi
+    """,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def transfer_organization_ownership(
+    org_id: str,
+    new_owner_user_id: str,
+    auth_service: AuthServiceDep,
+):
+    """Organizasyon sahipliğini devret."""
+    import uuid
+    return await auth_service.transfer_organization_ownership(
+        org_id=uuid.UUID(org_id),
+        new_owner_user_id=uuid.UUID(new_owner_user_id),
+    )
+
+
+@admin_router.get(
+    "/users",
+    response_model=AdminUserListResponse,
+    summary="Tüm Kullanıcıları Listele (Global)",
+    description="""
+**Sadece Admin için.**
+
+Sistemdeki TÜM kullanıcıları (hangi organizasyonda olursa olsun) listeler.
+
+**Filtreler:** search (email, ad, telefon), status, is_active
+**Sayfalama:** page, page_size
+    """,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def list_all_users_global(
+    auth_service: AuthServiceDep,
+    page: int = 1,
+    page_size: int = 20,
+    search: str | None = None,
+    status: str | None = None,
+    is_active: bool | None = None,
+) -> AdminUserListResponse:
+    """Tüm kullanıcıları listele (Global Search)."""
+    return await auth_service.list_all_users_global(
+        page=page,
+        page_size=page_size,
+        search=search,
+        status=status,
+        is_active=is_active,
+    )
+
+
+@admin_router.post(
+    "/users/{user_id}/revoke-sessions",
+    summary="Kullanıcı Oturumlarını Sonlandır",
+    description="""
+**Sadece Admin için.**
+
+Kullanıcının tüm aktif oturumlarını (token'larını) iptal eder.
+
+**Kullanım Senaryoları:**
+- Kullanıcı hesabı hacklendiğinde
+- Cihaz çalındığında
+- Güvenlik ihlali şüphesinde
+    """,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def revoke_user_sessions(
+    user_id: str,
+    auth_service: AuthServiceDep,
+):
+    """Kullanıcı oturumlarını sonlandır."""
+    import uuid
+    return await auth_service.revoke_user_sessions(
+        user_id=uuid.UUID(user_id),
+    )
+
+
+@admin_router.post(
+    "/users/{user_id}/ban",
+    summary="Kullanıcıyı Yasakla",
+    description="""
+**Sadece Admin için.**
+
+Kullanıcıyı sistemden kalıcı olarak yasaklar.
+Tüm oturumları sonlandırılır ve giriş yapması engellenir.
+    """,
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def ban_user(
+    user_id: str,
+    auth_service: AuthServiceDep,
+    reason: str | None = None,
+):
+    """Kullanıcıyı yasakla."""
+    import uuid
+    return await auth_service.ban_user(
+        user_id=uuid.UUID(user_id),
+        reason=reason,
+    )
