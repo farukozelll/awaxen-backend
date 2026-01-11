@@ -2721,6 +2721,23 @@ class AuthService:
         await self.db.commit()
         await self.db.refresh(invitation)
         
+        # Email gönder (Resend)
+        try:
+            from src.modules.notifications.service import NotificationService
+            notification_service = NotificationService(self.db)
+            await notification_service.send_invitation_email(
+                email=email,
+                token=token,
+                org_name=org.name,
+                invited_by_name=invited_by.full_name,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to send invitation email, but invitation created",
+                error=str(e),
+                email=email,
+            )
+        
         logger.info(
             "Invitation created",
             invitation_id=str(invitation.id),

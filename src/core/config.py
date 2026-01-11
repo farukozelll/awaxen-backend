@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     # PostGIS
     postgis_enabled: bool = Field(default=False, description="Enable PostGIS for geo-spatial queries")
 
+    # Resend Email
+    resend_api_key: str = Field(default="", description="Resend API key for sending emails")
+    email_sender: str = Field(default="onboarding@resend.dev", description="Email sender address")
+
     # PgAdmin
     pgadmin_default_email: str = Field(default="admin@awaxen.com", description="PgAdmin email")
     pgadmin_default_password: str = Field(default="admin", description="PgAdmin password")

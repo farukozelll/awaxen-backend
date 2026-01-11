@@ -1,10 +1,11 @@
 """
-Notification Service - 3 Kanallı Bildirim Sistemi
+Notification Service - 4 Kanallı Bildirim Sistemi
 
 Kanallar:
 1. In-App (Database) - Notification tablosu
 2. FCM (Web Push) - Firebase Cloud Messaging
 3. Telegram - Kritik alarmlar için
+4. Email (Resend) - Davetiye ve önemli bildirimler
 
 Kullanım:
     service = NotificationService(db)
@@ -15,16 +16,29 @@ Kullanım:
         message="Banyo sensörü su kaçağı tespit etti.",
         send_telegram=True,
     )
+    
+    # Email gönderimi
+    await service.send_invitation_email(
+        email="user@example.com",
+        token="abc-123",
+        org_name="Awaxen",
+    )
 """
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import resend
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
 from src.core.config import settings
+
+# Initialize Resend API
+if settings.resend_api_key:
+    resend.api_key = settings.resend_api_key
+
 from src.modules.notifications.models import (
     Notification,
     UserFCMToken,
@@ -549,3 +563,152 @@ class NotificationService:
             "is_connected": bool(row and row[0]),
             "telegram_username": row[1] if row else None,
         }
+    
+    # ============== EMAIL (RESEND) ==============
+    
+    async def send_invitation_email(
+        self,
+        email: str,
+        token: str,
+        org_name: str,
+        invited_by_name: str | None = None,
+    ) -> bool:
+        """
+        Kullanıcıya davet maili gönder.
+        
+        Args:
+            email: Davet edilecek kullanıcının email adresi
+            token: Davet token'ı
+            org_name: Organizasyon adı
+            invited_by_name: Davet eden kişinin adı (opsiyonel)
+        
+        Returns:
+            bool: Mail başarıyla gönderildiyse True
+        """
+        if not settings.resend_api_key:
+            logger.warning("Resend API key not configured, skipping email")
+            return False
+        
+        # Frontend davet linki
+        invite_link = f"https://app.awaxen.com/join?token={token}"
+        
+        # Davet eden bilgisi
+        inviter_text = f" ({invited_by_name} tarafından)" if invited_by_name else ""
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="text-align: center; margin-bottom: 30px;">
+                <h1 style="color: #000; margin-bottom: 10px;">🏠 Awaxen'e Hoşgeldiniz!</h1>
+            </div>
+            
+            <div style="background-color: #f8f9fa; border-radius: 10px; padding: 30px; margin-bottom: 20px;">
+                <p style="font-size: 16px; margin-bottom: 20px;">
+                    <strong>{org_name}</strong> sizi ekibine katılmaya davet ediyor{inviter_text}.
+                </p>
+                
+                <p style="font-size: 14px; color: #666; margin-bottom: 25px;">
+                    Awaxen ile akıllı bina yönetimi, enerji optimizasyonu ve IoT cihaz kontrolü yapabilirsiniz.
+                </p>
+                
+                <div style="text-align: center;">
+                    <a href="{invite_link}" 
+                       style="display: inline-block; background-color: #000; color: #fff; padding: 14px 30px; 
+                              text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                        ✉️ Daveti Kabul Et
+                    </a>
+                </div>
+            </div>
+            
+            <div style="font-size: 12px; color: #999; text-align: center; margin-top: 30px;">
+                <p>Bu link 48 saat geçerlidir.</p>
+                <p>Eğer bu daveti beklemiyorsanız, bu maili görmezden gelebilirsiniz.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p>© 2026 Awaxen - Akıllı Bina Yönetim Platformu</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        try:
+            result = resend.Emails.send({
+                "from": settings.email_sender,
+                "to": email,
+                "subject": f"🏠 {org_name} sizi Awaxen'e davet ediyor",
+                "html": html_content,
+            })
+            
+            logger.info(
+                "Invitation email sent",
+                email=email,
+                org_name=org_name,
+                resend_id=result.get("id") if isinstance(result, dict) else str(result),
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(
+                "Failed to send invitation email",
+                email=email,
+                error=str(e),
+            )
+            return False
+    
+    async def send_welcome_email(self, email: str, full_name: str) -> bool:
+        """Yeni kullanıcıya hoşgeldin maili gönder."""
+        if not settings.resend_api_key:
+            logger.warning("Resend API key not configured, skipping email")
+            return False
+        
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h1 style="color: #000;">🎉 Hoşgeldiniz, {full_name}!</h1>
+            
+            <p>Awaxen ailesine katıldığınız için teşekkür ederiz.</p>
+            
+            <p>Artık şunları yapabilirsiniz:</p>
+            <ul>
+                <li>🏠 Gayrimenkullerinizi yönetin</li>
+                <li>📡 IoT cihazlarınızı bağlayın</li>
+                <li>⚡ Enerji tüketiminizi optimize edin</li>
+                <li>🎁 AWX puanları kazanın</li>
+            </ul>
+            
+            <p>
+                <a href="https://app.awaxen.com/dashboard" 
+                   style="display: inline-block; background-color: #000; color: #fff; padding: 12px 24px; 
+                          text-decoration: none; border-radius: 6px;">
+                    Dashboard'a Git
+                </a>
+            </p>
+            
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+            <p style="font-size: 12px; color: #999;">© 2026 Awaxen</p>
+        </body>
+        </html>
+        """
+        
+        try:
+            result = resend.Emails.send({
+                "from": settings.email_sender,
+                "to": email,
+                "subject": "🎉 Awaxen'e Hoşgeldiniz!",
+                "html": html_content,
+            })
+            
+            logger.info("Welcome email sent", email=email)
+            return True
+            
+        except Exception as e:
+            logger.error("Failed to send welcome email", email=email, error=str(e))
+            return False
