@@ -757,6 +757,57 @@ class AssignRoleToUserResponse(BaseModel):
     organization_id: uuid.UUID
 
 
+# ============== Module Management Schemas ==============
+
+class ModuleUpdateItem(BaseModel):
+    """Tek bir modül güncelleme bilgisi."""
+    module_code: str = Field(..., examples=["iot"])
+    is_active: bool = Field(True, description="Modül aktif mi?")
+    trial_ends_at: datetime | None = Field(None, description="Deneme süresi bitiş tarihi")
+    settings: dict | None = Field(None, description="Modül ayarları")
+
+
+class OrganizationModulesUpdateRequest(BaseModel):
+    """
+    Organizasyon modüllerini güncelleme isteği (PUT).
+    Upsell ve Feature Flagging için kullanılır.
+    """
+    modules: list[ModuleUpdateItem] = Field(
+        ...,
+        description="Güncellenecek modüller listesi",
+        examples=[[
+            {"module_code": "iot", "is_active": True},
+            {"module_code": "energy", "is_active": True, "trial_ends_at": "2024-02-15T00:00:00Z"},
+            {"module_code": "billing", "is_active": False}
+        ]]
+    )
+
+
+class OrganizationModulesUpdateResponse(BaseModel):
+    """Modül güncelleme yanıtı."""
+    message: str
+    organization_id: uuid.UUID
+    updated_modules: list[OrganizationModuleResponse]
+    active_modules: list[str]
+
+
+# ============== Impersonation Schemas ==============
+
+class ImpersonateUserRequest(BaseModel):
+    """Kullanıcı taklit etme isteği (opsiyonel parametreler)."""
+    reason: str | None = Field(None, description="Taklit etme nedeni (audit log için)")
+    duration_minutes: int = Field(60, ge=5, le=480, description="Token geçerlilik süresi (dakika)")
+
+
+class ImpersonateUserResponse(BaseModel):
+    """Kullanıcı taklit etme yanıtı."""
+    message: str
+    impersonated_user: UserResponse
+    access_token: str
+    expires_at: datetime
+    admin_user_id: uuid.UUID
+
+
 # Forward references
 UserWithOrganizations.model_rebuild()
 OrganizationWithMembers.model_rebuild()

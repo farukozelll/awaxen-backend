@@ -115,20 +115,62 @@ audit_router = APIRouter(prefix="/audit", tags=["Admin"])
 
 @audit_router.get("/logs", response_model=AuditLogListResponse)
 async def get_audit_logs(
-    organization_id: UUID | None = Query(None),
-    entity_type: str | None = Query(None),
-    action: str | None = Query(None),
+    organization_id: UUID | None = Query(None, description="Sadece bu organizasyonun logları"),
+    user_id: UUID | None = Query(None, description="Sadece bu kullanıcının yaptığı işlemler"),
+    entity_type: str | None = Query(None, description="Entity tipi (asset, device, user, etc.)"),
+    action: str | None = Query(None, description="Aksiyon tipi (create, update, delete, etc.)"),
+    start_date: str | None = Query(None, description="Başlangıç tarihi (ISO format: 2024-01-01T00:00:00Z)"),
+    end_date: str | None = Query(None, description="Bitiş tarihi (ISO format: 2024-01-31T23:59:59Z)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     current_user: User = Depends(require_permissions(["audit:read"])),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get audit logs (admin only)."""
+    """
+    Get audit logs with advanced filtering (admin only).
+    
+    **Filtreler:**
+    - `organization_id`: Sadece belirli bir organizasyonun logları
+    - `user_id`: Sadece belirli bir kullanıcının yaptığı işlemler
+    - `entity_type`: Entity tipi (asset, device, gateway, user, organization, etc.)
+    - `action`: Aksiyon tipi (create, update, delete, login, etc.)
+    - `start_date` / `end_date`: Tarih aralığı (ISO 8601 format)
+    
+    **Örnek Kullanım:**
+    - Bir organizasyonun tüm logları: `?organization_id=xxx`
+    - Bir kullanıcının yaptıkları: `?user_id=xxx`
+    - Son 7 günün logları: `?start_date=2024-01-08T00:00:00Z`
+    - Belirli bir aksiyonun logları: `?action=device.create`
+    """
+    from datetime import datetime
+    
+    # Parse date strings to datetime
+    start_datetime = None
+    end_datetime = None
+    
+    if start_date:
+        try:
+            start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Invalid start_date format. Use ISO 8601 format.")
+    
+    if end_date:
+        try:
+            end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Invalid end_date format. Use ISO 8601 format.")
+    
     service = AuditLogService(db)
     logs, total = await service.get_logs(
         organization_id=organization_id,
         entity_type=entity_type,
+        entity_id=None,
+        actor_user_id=user_id,
         action=action,
+        start_date=start_datetime,
+        end_date=end_datetime,
         page=page,
         page_size=page_size,
     )

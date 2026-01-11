@@ -358,10 +358,13 @@ def _include_routers(app: FastAPI) -> None:
     
     API Versioning: Only /api/v1/... is supported.
     Unversioned requests to /api/... will receive 404.
+    
+    L7 Best Practice: Auth modülü sadece kimlik doğrulama yapar.
+    Admin işlemleri ayrı Admin modülünde.
     """
     from src.modules.auth.router import router as auth_router
     from src.modules.auth.router import users_router
-    from src.modules.auth.router import admin_router
+    from src.modules.admin.router import router as admin_router  # Ayrı Admin modülü
     from src.modules.billing.router import router as billing_router
     from src.modules.billing.router import admin_router as billing_admin_router
     from src.modules.iot.router import router as iot_router

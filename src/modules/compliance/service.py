@@ -139,10 +139,14 @@ class AuditLogService:
         entity_id: UUID | None = None,
         actor_user_id: UUID | None = None,
         action: str | None = None,
+        start_date: "datetime | None" = None,
+        end_date: "datetime | None" = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[AuditLog], int]:
         """Get audit logs with filtering and pagination."""
+        from datetime import datetime
+        
         query = select(AuditLog)
         count_query = select(func.count(AuditLog.id))
 
@@ -161,6 +165,14 @@ class AuditLogService:
         if action:
             query = query.where(AuditLog.action == action)
             count_query = count_query.where(AuditLog.action == action)
+        
+        # Date range filtering
+        if start_date:
+            query = query.where(AuditLog.created_at >= start_date)
+            count_query = count_query.where(AuditLog.created_at >= start_date)
+        if end_date:
+            query = query.where(AuditLog.created_at <= end_date)
+            count_query = count_query.where(AuditLog.created_at <= end_date)
 
         total_result = await self.db.execute(count_query)
         total = total_result.scalar() or 0

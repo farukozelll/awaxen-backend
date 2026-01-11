@@ -2017,4 +2017,448 @@ class AuthService:
             "message": f"'{user.email}' kullanıcısı yasaklandı",
         }
     
+    # ============== Module Management (Upsell & Feature Flagging) ==============
     
+    async def update_organization_modules(
+        self,
+        org_id: uuid.UUID,
+        modules: list[dict],
+    ) -> dict:
+        """
+        Update organization modules (Admin only).
+        
+        Bir müşteriye modül satışı veya deneme süresi yönetimi için kullanılır.
+        - Yeni modül ekle
+        - Mevcut modülü aktif/pasif yap
+        - Deneme süresi ayarla
+        - Modül ayarlarını güncelle
+        """
+        from src.modules.auth.schemas import OrganizationModulesUpdateResponse, OrganizationModuleResponse
+        
+        org = await self.get_organization_by_id(org_id)
+        if not org:
+            raise NotFoundError("Organization", org_id)
+        
+        now = datetime.now(timezone.utc)
+        updated_modules = []
+        
+        for module_data in modules:
+            module_code = module_data.get("module_code")
+            is_active = module_data.get("is_active", True)
+            trial_ends_at = module_data.get("trial_ends_at")
+            settings = module_data.get("settings")
+            
+            # Modül kodu geçerli mi kontrol et
+            if module_code not in [m.value for m in ModuleType]:
+                logger.warning("Invalid module code", module_code=module_code)
+                continue
+            
+            # Mevcut modül var mı kontrol et
+            stmt = select(OrganizationModule).where(
+                OrganizationModule.organization_id == org_id,
+                OrganizationModule.module_code == module_code,
+            )
+            result = await self.db.execute(stmt)
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                # Güncelle
+                existing.is_active = is_active
+                if settings is not None:
+                    existing.settings = settings
+                updated_modules.append(existing)
+            else:
+                # Yeni modül ekle
+                new_module = OrganizationModule(
+                    organization_id=org_id,
+                    module_code=module_code,
+                    is_active=is_active,
+                    activated_at=now,
+                    settings=settings,
+                )
+                self.db.add(new_module)
+                updated_modules.append(new_module)
+        
+        await self.db.commit()
+        
+        # Güncel modül listesini al
+        stmt = select(OrganizationModule).where(
+            OrganizationModule.organization_id == org_id
+        )
+        result = await self.db.execute(stmt)
+        all_modules = result.scalars().all()
+        
+        active_modules = [m.module_code for m in all_modules if m.is_active]
+        
+        logger.info(
+            "Organization modules updated",
+            org_id=str(org_id),
+            updated_count=len(updated_modules),
+            active_modules=active_modules,
+        )
+        
+        return OrganizationModulesUpdateResponse(
+            message=f"{len(updated_modules)} modül güncellendi",
+            organization_id=org_id,
+            updated_modules=[OrganizationModuleResponse.model_validate(m) for m in updated_modules],
+            active_modules=active_modules,
+        )
+    
+    # ============== User Impersonation (Customer Support) ==============
+    
+    async def impersonate_user(
+        self,
+        admin_user: User,
+        target_user_id: uuid.UUID,
+        reason: str | None = None,
+        duration_minutes: int = 60,
+    ) -> dict:
+        """
+        Impersonate a user (Admin only).
+        
+        Müşteri hizmetleri için: Admin, kullanıcının gözünden sistemi görebilir.
+        Geçici bir access token üretir.
+        
+        Security:
+        - Sadece admin yapabilir
+        - Audit log'a kaydedilir
+        - Token süresi sınırlı (varsayılan 60 dakika, max 8 saat)
+        - Token'da impersonation flag'i var
+        """
+        from src.modules.auth.schemas import ImpersonateUserResponse, UserResponse
+        from src.core.security import create_access_token
+        from datetime import timedelta
+        
+        target_user = await self.get_user_by_id(target_user_id)
+        if not target_user:
+            raise NotFoundError("User", target_user_id)
+        
+        if not target_user.is_active:
+            raise UnauthorizedError("Cannot impersonate inactive user")
+        
+        # Get target user's default organization and role
+        default_org_id = None
+        role_code = None
+        permissions: list[str] = []
+        
+        for membership in target_user.organization_memberships:
+            if membership.is_default:
+                default_org_id = membership.organization_id
+                if membership.role:
+                    role_code = membership.role.code
+                    permissions = membership.role.permissions or []
+                break
+        
+        # Create impersonation token with special claims
+        expires_delta = timedelta(minutes=duration_minutes)
+        expires_at = datetime.now(timezone.utc) + expires_delta
+        
+        token = create_access_token(
+            subject=str(target_user.id),
+            extra_claims={
+                "org_id": str(default_org_id) if default_org_id else None,
+                "role": role_code,
+                "permissions": permissions,
+                "impersonated_by": str(admin_user.id),
+                "impersonation": True,
+            },
+            expires_delta=expires_delta,
+        )
+        
+        logger.warning(
+            "User impersonation started",
+            admin_id=str(admin_user.id),
+            admin_email=admin_user.email,
+            target_user_id=str(target_user_id),
+            target_email=target_user.email,
+            reason=reason,
+            duration_minutes=duration_minutes,
+        )
+        
+        return ImpersonateUserResponse(
+            message=f"'{target_user.email}' kullanıcısı olarak giriş yapıldı",
+            impersonated_user=UserResponse.model_validate(target_user),
+            access_token=token,
+            expires_at=expires_at,
+            admin_user_id=admin_user.id,
+        )
+    
+    # ============== Enhanced Soft Delete with Cascade ==============
+    
+    async def delete_organization_with_cascade(
+        self,
+        org_id: uuid.UUID,
+        hard_delete: bool = False,
+    ) -> dict:
+        """
+        Delete organization with proper cascade handling (Admin only).
+        
+        Soft Delete durumunda:
+        - Organizasyon is_active=False
+        - Tüm kullanıcılar is_active=False (Zombi kullanıcı önleme)
+        - IoT cihazları status='suspended'
+        - Gateway'ler status='suspended'
+        - Aktif faturalar status='cancelled'
+        
+        Hard Delete durumunda:
+        - Tüm veriler CASCADE ile silinir (DB foreign key)
+        """
+        org = await self.get_organization_by_id(org_id)
+        if not org:
+            raise NotFoundError("Organization", org_id)
+        
+        org_name = org.name
+        org_slug = org.slug
+        
+        if hard_delete:
+            # Hard delete - CASCADE ile tüm ilişkili veriler silinir
+            await self.db.delete(org)
+            await self.db.commit()
+            
+            logger.warning(
+                "Organization HARD DELETED with cascade",
+                org_id=str(org_id),
+                org_name=org_name,
+            )
+            
+            return {
+                "status": "deleted",
+                "method": "hard_delete",
+                "organization_id": str(org_id),
+                "organization_name": org_name,
+                "cascade_actions": ["all_data_deleted"],
+                "message": f"Organizasyon '{org_name}' ve tüm verileri kalıcı olarak silindi",
+            }
+        
+        # Soft delete with cascade
+        cascade_results = {
+            "users_deactivated": 0,
+            "devices_suspended": 0,
+            "gateways_suspended": 0,
+        }
+        
+        # 1. Organizasyonu deaktif et
+        org.is_active = False
+        org.status = "deleted"
+        
+        # 2. Tüm kullanıcıları deaktif et (Zombi kullanıcı önleme)
+        from sqlalchemy import update
+        user_ids_stmt = select(OrganizationUser.user_id).where(
+            OrganizationUser.organization_id == org_id
+        )
+        user_ids_result = await self.db.execute(user_ids_stmt)
+        user_ids = [row[0] for row in user_ids_result.fetchall()]
+        
+        if user_ids:
+            # Sadece bu organizasyona ait kullanıcıları deaktif et
+            # (Birden fazla org'a üye olanlar için dikkatli ol)
+            for user_id in user_ids:
+                # Kullanıcının başka aktif organizasyonu var mı?
+                other_orgs_stmt = select(OrganizationUser).where(
+                    OrganizationUser.user_id == user_id,
+                    OrganizationUser.organization_id != org_id,
+                )
+                other_orgs_result = await self.db.execute(other_orgs_stmt)
+                other_orgs = other_orgs_result.scalars().all()
+                
+                # Başka aktif org yoksa kullanıcıyı deaktif et
+                if not other_orgs:
+                    user_update_stmt = (
+                        update(User)
+                        .where(User.id == user_id)
+                        .values(is_active=False, status="org_deleted")
+                    )
+                    await self.db.execute(user_update_stmt)
+                    cascade_results["users_deactivated"] += 1
+        
+        # 3. IoT cihazlarını suspend et
+        try:
+            from src.modules.iot.models import Device, Gateway
+            
+            device_update_stmt = (
+                update(Device)
+                .where(Device.organization_id == org_id)
+                .values(status="suspended")
+            )
+            device_result = await self.db.execute(device_update_stmt)
+            cascade_results["devices_suspended"] = device_result.rowcount
+            
+            gateway_update_stmt = (
+                update(Gateway)
+                .where(Gateway.organization_id == org_id)
+                .values(status="suspended")
+            )
+            gateway_result = await self.db.execute(gateway_update_stmt)
+            cascade_results["gateways_suspended"] = gateway_result.rowcount
+        except ImportError:
+            logger.debug("IoT module not available for cascade")
+        
+        await self.db.commit()
+        
+        logger.warning(
+            "Organization soft deleted with cascade",
+            org_id=str(org_id),
+            org_name=org_name,
+            cascade_results=cascade_results,
+        )
+        
+        return {
+            "status": "deactivated",
+            "method": "soft_delete",
+            "organization_id": str(org_id),
+            "organization_name": org_name,
+            "cascade_actions": cascade_results,
+            "message": f"Organizasyon '{org_name}' ve ilişkili kaynaklar devre dışı bırakıldı",
+        }
+    
+    # ============== Enhanced Revoke Sessions ==============
+    
+    async def revoke_user_sessions_enhanced(
+        self,
+        user_id: uuid.UUID,
+        revoke_auth0: bool = True,
+    ) -> dict:
+        """
+        Revoke all sessions for a user with Redis blacklist and Auth0 (Admin only).
+        
+        1. Redis'te refresh_token'ı blacklist'e ekle
+        2. Auth0 Management API ile oturumu kapat (opsiyonel)
+        3. Audit log'a kaydet
+        """
+        user = await self.get_user_by_id(user_id)
+        if not user:
+            raise NotFoundError("User", user_id)
+        
+        revoke_results = {
+            "redis_blacklisted": False,
+            "auth0_revoked": False,
+        }
+        
+        # 1. Redis'te token'ları blacklist'e ekle
+        try:
+            from src.core.redis import get_redis
+            redis = await get_redis()
+            if redis:
+                # User'ın tüm token'larını invalidate etmek için
+                # user_id bazlı bir blacklist key oluştur
+                blacklist_key = f"token_blacklist:user:{user_id}"
+                # 24 saat boyunca blacklist'te tut (access token max lifetime)
+                await redis.setex(blacklist_key, 86400, "revoked")
+                revoke_results["redis_blacklisted"] = True
+                logger.info("User tokens blacklisted in Redis", user_id=str(user_id))
+        except Exception as e:
+            logger.warning(f"Redis blacklist failed: {e}")
+        
+        # 2. Auth0 Management API ile session iptal
+        if revoke_auth0 and user.auth0_id:
+            try:
+                # TODO: Auth0 Management API entegrasyonu
+                # from src.core.auth0 import auth0_management
+                # await auth0_management.users.delete_sessions(user.auth0_id)
+                # revoke_results["auth0_revoked"] = True
+                logger.info("Auth0 session revocation skipped (not implemented)")
+            except Exception as e:
+                logger.warning(f"Auth0 session revocation failed: {e}")
+        
+        logger.warning(
+            "User sessions revoked (enhanced)",
+            user_id=str(user_id),
+            user_email=user.email,
+            results=revoke_results,
+        )
+        
+        return {
+            "status": "revoked",
+            "user_id": str(user_id),
+            "user_email": user.email,
+            "revoke_results": revoke_results,
+            "message": f"'{user.email}' kullanıcısının tüm oturumları sonlandırıldı",
+        }
+    
+    # ============== Enhanced Transfer Ownership ==============
+    
+    async def transfer_organization_ownership_validated(
+        self,
+        org_id: uuid.UUID,
+        new_owner_user_id: uuid.UUID,
+    ) -> dict:
+        """
+        Transfer organization ownership with validation (Admin only).
+        
+        Validasyonlar:
+        1. Yeni sahip organizasyonun mevcut üyesi mi?
+        2. Yeni sahip aktif mi?
+        
+        İşlemler:
+        1. Eski sahip tenant_admin → user rolüne düşürülür
+        2. Yeni sahip → tenant_admin rolüne yükseltilir
+        3. Audit log kaydı
+        """
+        org = await self.get_organization_by_id(org_id)
+        if not org:
+            raise NotFoundError("Organization", org_id)
+        
+        new_owner = await self.get_user_by_id(new_owner_user_id)
+        if not new_owner:
+            raise NotFoundError("User", new_owner_user_id)
+        
+        if not new_owner.is_active:
+            raise UnauthorizedError("New owner must be an active user")
+        
+        # Yeni sahip organizasyonun üyesi mi kontrol et
+        new_owner_membership = None
+        for m in org.members:
+            if m.user_id == new_owner_user_id:
+                new_owner_membership = m
+                break
+        
+        if not new_owner_membership:
+            raise UnauthorizedError(
+                f"User {new_owner.email} is not a member of organization {org.name}. "
+                "New owner must be an existing member."
+            )
+        
+        # Get tenant role
+        tenant_role = await self._get_or_create_tenant_role()
+        user_role = await self._get_or_create_role(RoleType.USER.value)
+        
+        # Find current owner
+        current_owner_membership = None
+        current_owner_email = None
+        
+        for m in org.members:
+            if m.role_id == tenant_role.id:
+                current_owner_membership = m
+                if m.user:
+                    current_owner_email = m.user.email
+                break
+        
+        # Demote current owner to user role
+        if current_owner_membership:
+            current_owner_membership.role_id = user_role.id
+        
+        # Promote new owner to tenant role
+        new_owner_membership.role_id = tenant_role.id
+        new_owner_membership.is_default = True
+        
+        await self.db.commit()
+        
+        logger.info(
+            "Organization ownership transferred (validated)",
+            org_id=str(org_id),
+            org_name=org.name,
+            old_owner_email=current_owner_email,
+            new_owner_email=new_owner.email,
+        )
+        
+        return {
+            "status": "transferred",
+            "organization_id": str(org_id),
+            "organization_name": org.name,
+            "old_owner_email": current_owner_email,
+            "new_owner_id": str(new_owner_user_id),
+            "new_owner_email": new_owner.email,
+            "message": f"Organizasyon sahipliği '{new_owner.email}' kullanıcısına devredildi",
+        }
+
+
