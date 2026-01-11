@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     auth0_domain: str = Field(default="", description="Auth0 domain")
     auth0_audience: str = Field(default="", description="Auth0 API audience")
     auth0_client_id: str = Field(default="", description="Auth0 client ID")
+    auth0_client_secret: str = Field(default="", description="Auth0 client secret for Management API")
+    auth0_management_audience: str = Field(default="", description="Auth0 Management API audience")
 
     # CORS
     cors_origins: str = Field(default="http://localhost:3005", description="Allowed CORS origins")

@@ -263,3 +263,247 @@ def require_role(role: str):
         return user
     
     return check_role
+
+
+# ============== Auth0 Management API ==============
+
+class Auth0ManagementClient:
+    """
+    Auth0 Management API Client.
+    
+    Used for administrative operations:
+    - Revoking user sessions
+    - Managing user metadata
+    - Blocking/unblocking users
+    
+    Requires Machine-to-Machine application with Management API permissions.
+    """
+    
+    def __init__(self):
+        self.domain = settings.auth0_domain
+        self.client_id = settings.auth0_client_id
+        self.client_secret = settings.auth0_client_secret
+        self.audience = settings.auth0_management_audience or f"https://{self.domain}/api/v2/"
+        self._token: str | None = None
+        self._token_expires_at: float = 0
+        self._client: httpx.AsyncClient | None = None
+    
+    @property
+    def is_configured(self) -> bool:
+        """Check if Management API is properly configured."""
+        return bool(self.domain and self.client_id and self.client_secret)
+    
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create HTTP client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=30.0)
+        return self._client
+    
+    async def close(self) -> None:
+        """Close HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+    
+    async def _get_management_token(self) -> str:
+        """
+        Get Management API access token using client credentials flow.
+        Token is cached until expiration.
+        """
+        import time
+        
+        # Return cached token if still valid (with 60s buffer)
+        if self._token and time.time() < (self._token_expires_at - 60):
+            return self._token
+        
+        if not self.is_configured:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Auth0 Management API not configured",
+            )
+        
+        client = await self._get_client()
+        token_url = f"https://{self.domain}/oauth/token"
+        
+        try:
+            response = await client.post(
+                token_url,
+                json={
+                    "grant_type": "client_credentials",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "audience": self.audience,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            self._token = data["access_token"]
+            # expires_in is in seconds
+            self._token_expires_at = time.time() + data.get("expires_in", 86400)
+            
+            logger.info("Auth0 Management API token obtained")
+            return self._token
+            
+        except httpx.HTTPError as e:
+            logger.error("Failed to get Auth0 Management token", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to authenticate with Auth0 Management API",
+            )
+    
+    async def revoke_user_sessions(self, auth0_user_id: str) -> dict[str, Any]:
+        """
+        Revoke all sessions for a user.
+        
+        This invalidates all refresh tokens and forces re-authentication.
+        
+        Args:
+            auth0_user_id: Auth0 user ID (e.g., "auth0|123456")
+            
+        Returns:
+            Result dict with status
+        """
+        if not self.is_configured:
+            logger.warning("Auth0 Management API not configured, skipping session revocation")
+            return {"status": "skipped", "reason": "not_configured"}
+        
+        token = await self._get_management_token()
+        client = await self._get_client()
+        
+        # Auth0 Management API endpoint to delete all user sessions
+        # POST /api/v2/users/{id}/sessions/revoke
+        url = f"https://{self.domain}/api/v2/users/{auth0_user_id}/sessions/revoke"
+        
+        try:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            
+            if response.status_code == 204:
+                logger.info("Auth0 sessions revoked", user_id=auth0_user_id)
+                return {"status": "revoked", "user_id": auth0_user_id}
+            elif response.status_code == 404:
+                logger.warning("Auth0 user not found", user_id=auth0_user_id)
+                return {"status": "not_found", "user_id": auth0_user_id}
+            else:
+                response.raise_for_status()
+                return {"status": "unknown", "user_id": auth0_user_id}
+                
+        except httpx.HTTPError as e:
+            logger.error("Failed to revoke Auth0 sessions", user_id=auth0_user_id, error=str(e))
+            return {"status": "error", "error": str(e)}
+    
+    async def block_user(self, auth0_user_id: str) -> dict[str, Any]:
+        """
+        Block a user in Auth0.
+        
+        Blocked users cannot log in.
+        
+        Args:
+            auth0_user_id: Auth0 user ID
+            
+        Returns:
+            Result dict
+        """
+        if not self.is_configured:
+            return {"status": "skipped", "reason": "not_configured"}
+        
+        token = await self._get_management_token()
+        client = await self._get_client()
+        
+        url = f"https://{self.domain}/api/v2/users/{auth0_user_id}"
+        
+        try:
+            response = await client.patch(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json={"blocked": True},
+            )
+            response.raise_for_status()
+            
+            logger.info("Auth0 user blocked", user_id=auth0_user_id)
+            return {"status": "blocked", "user_id": auth0_user_id}
+            
+        except httpx.HTTPError as e:
+            logger.error("Failed to block Auth0 user", user_id=auth0_user_id, error=str(e))
+            return {"status": "error", "error": str(e)}
+    
+    async def unblock_user(self, auth0_user_id: str) -> dict[str, Any]:
+        """
+        Unblock a user in Auth0.
+        
+        Args:
+            auth0_user_id: Auth0 user ID
+            
+        Returns:
+            Result dict
+        """
+        if not self.is_configured:
+            return {"status": "skipped", "reason": "not_configured"}
+        
+        token = await self._get_management_token()
+        client = await self._get_client()
+        
+        url = f"https://{self.domain}/api/v2/users/{auth0_user_id}"
+        
+        try:
+            response = await client.patch(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json={"blocked": False},
+            )
+            response.raise_for_status()
+            
+            logger.info("Auth0 user unblocked", user_id=auth0_user_id)
+            return {"status": "unblocked", "user_id": auth0_user_id}
+            
+        except httpx.HTTPError as e:
+            logger.error("Failed to unblock Auth0 user", user_id=auth0_user_id, error=str(e))
+            return {"status": "error", "error": str(e)}
+    
+    async def get_user(self, auth0_user_id: str) -> dict[str, Any] | None:
+        """
+        Get user details from Auth0.
+        
+        Args:
+            auth0_user_id: Auth0 user ID
+            
+        Returns:
+            User data or None if not found
+        """
+        if not self.is_configured:
+            return None
+        
+        token = await self._get_management_token()
+        client = await self._get_client()
+        
+        url = f"https://{self.domain}/api/v2/users/{auth0_user_id}"
+        
+        try:
+            response = await client.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            
+            if response.status_code == 404:
+                return None
+            
+            response.raise_for_status()
+            return response.json()
+            
+        except httpx.HTTPError as e:
+            logger.error("Failed to get Auth0 user", user_id=auth0_user_id, error=str(e))
+            return None
+
+
+# Singleton instance
+_auth0_management: Auth0ManagementClient | None = None
+
+
+def get_auth0_management() -> Auth0ManagementClient:
+    """Get or create Auth0 Management API client singleton."""
+    global _auth0_management
+    if _auth0_management is None:
+        _auth0_management = Auth0ManagementClient()
+    return _auth0_management

@@ -1267,6 +1267,17 @@ class AuthService:
             # Modules
             modules = await self.get_organization_modules(org.id)
             
+            # Device count
+            try:
+                from src.modules.iot.models import Device
+                device_count_stmt = select(func.count(Device.id)).where(
+                    Device.organization_id == org.id
+                )
+                device_count_result = await self.db.execute(device_count_stmt)
+                device_count = device_count_result.scalar() or 0
+            except Exception:
+                device_count = 0
+            
             items.append(AdminOrganizationListItem(
                 id=org.id,
                 name=org.name,
@@ -1275,7 +1286,7 @@ class AuthService:
                 is_active=org.is_active,
                 created_at=org.created_at,
                 user_count=user_count,
-                device_count=0,  # TODO: Device count
+                device_count=device_count,
                 modules=modules,
             ))
         
@@ -1593,6 +1604,28 @@ class AuthService:
         # Wallet bilgilerini getir
         wallet_summary = await self._get_organization_wallet_summary(org_uuid)
         
+        # Device count
+        try:
+            from src.modules.iot.models import Device
+            device_count_stmt = select(func.count(Device.id)).where(
+                Device.organization_id == org_uuid
+            )
+            device_count_result = await self.db.execute(device_count_stmt)
+            device_count = device_count_result.scalar() or 0
+        except Exception:
+            device_count = 0
+        
+        # Asset count
+        try:
+            from src.modules.real_estate.models import Asset
+            asset_count_stmt = select(func.count(Asset.id)).where(
+                Asset.organization_id == org_uuid
+            )
+            asset_count_result = await self.db.execute(asset_count_stmt)
+            asset_count = asset_count_result.scalar() or 0
+        except Exception:
+            asset_count = 0
+        
         return {
             "organization_id": organization_id,
             "organization_name": org.name,
@@ -1601,8 +1634,8 @@ class AuthService:
             "inactive_users": total_users - active_users,
             "role_distribution": role_distribution,
             "recent_activity_30_days": recent_activity,
-            "device_count": 0,  # TODO: Implement device counting
-            "asset_count": 0,   # TODO: Implement asset counting
+            "device_count": device_count,
+            "asset_count": asset_count,
             "wallet_summary": wallet_summary,
         }
     
@@ -1872,22 +1905,45 @@ class AuthService:
         if not user:
             raise NotFoundError("User", user_id)
         
-        # TODO: Auth0 Management API ile session iptal
-        # await auth0_client.users.delete_sessions(user.auth0_id)
+        revoke_results = {
+            "redis_blacklisted": False,
+            "auth0_revoked": False,
+        }
         
-        # Local token invalidation (if using local tokens)
-        # Bu genellikle Redis'te token blacklist tutarak yapılır
+        # 1. Redis'te token'ları blacklist'e ekle
+        try:
+            from src.core.redis import get_redis
+            redis = await get_redis()
+            if redis:
+                blacklist_key = f"token_blacklist:user:{user_id}"
+                await redis.setex(blacklist_key, 86400, "revoked")
+                revoke_results["redis_blacklisted"] = True
+        except Exception as e:
+            logger.warning(f"Redis blacklist failed: {e}")
+        
+        # 2. Auth0 Management API ile session iptal
+        if user.auth0_id:
+            try:
+                from src.core.auth0 import get_auth0_management
+                auth0_mgmt = get_auth0_management()
+                if auth0_mgmt.is_configured:
+                    result = await auth0_mgmt.revoke_user_sessions(user.auth0_id)
+                    revoke_results["auth0_revoked"] = result.get("status") == "revoked"
+            except Exception as e:
+                logger.warning(f"Auth0 session revocation failed: {e}")
         
         logger.warning(
             "User sessions revoked",
             user_id=str(user_id),
             user_email=user.email,
+            results=revoke_results,
         )
         
         return {
             "status": "revoked",
             "user_id": str(user_id),
             "user_email": user.email,
+            "revoke_results": revoke_results,
             "message": f"'{user.email}' kullanıcısının tüm oturumları sonlandırıldı",
         }
     
@@ -2332,6 +2388,7 @@ class AuthService:
         revoke_results = {
             "redis_blacklisted": False,
             "auth0_revoked": False,
+            "auth0_status": None,
         }
         
         # 1. Redis'te token'ları blacklist'e ekle
@@ -2352,13 +2409,25 @@ class AuthService:
         # 2. Auth0 Management API ile session iptal
         if revoke_auth0 and user.auth0_id:
             try:
-                # TODO: Auth0 Management API entegrasyonu
-                # from src.core.auth0 import auth0_management
-                # await auth0_management.users.delete_sessions(user.auth0_id)
-                # revoke_results["auth0_revoked"] = True
-                logger.info("Auth0 session revocation skipped (not implemented)")
+                from src.core.auth0 import get_auth0_management
+                auth0_mgmt = get_auth0_management()
+                
+                if auth0_mgmt.is_configured:
+                    result = await auth0_mgmt.revoke_user_sessions(user.auth0_id)
+                    revoke_results["auth0_status"] = result.get("status")
+                    revoke_results["auth0_revoked"] = result.get("status") == "revoked"
+                    logger.info(
+                        "Auth0 session revocation completed",
+                        user_id=str(user_id),
+                        auth0_id=user.auth0_id,
+                        result=result,
+                    )
+                else:
+                    revoke_results["auth0_status"] = "not_configured"
+                    logger.info("Auth0 Management API not configured, skipping")
             except Exception as e:
                 logger.warning(f"Auth0 session revocation failed: {e}")
+                revoke_results["auth0_status"] = f"error: {str(e)}"
         
         logger.warning(
             "User sessions revoked (enhanced)",

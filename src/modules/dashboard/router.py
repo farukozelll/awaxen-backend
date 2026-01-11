@@ -206,19 +206,108 @@ curl -X GET "https://api.awaxen.com/api/v1/dashboard/savings/summary?period=mont
 async def get_savings_summary(
     current_user: CurrentUser,
     service: DashboardServiceDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     period: str = Query(default="all_time", description="Dönem (all_time, monthly, yearly)"),
 ) -> SavingsSummaryResponse:
     """Tasarruf özet bilgilerini döner."""
-    # TODO: Gerçek tasarruf hesaplaması implement edilecek
-    return SavingsSummaryResponse(
-        savings=SavingsSummary(
-            total_savings_kwh=0.0,
-            total_savings_tl=0.0,
-            monthly_savings_kwh=0.0,
-            monthly_savings_tl=0.0,
-            co2_reduction_kg=0.0,
-            tree_equivalent=0,
-        ),
-        period=period,
-        currency="TRY",
-    )
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select, func
+    from decimal import Decimal
+    
+    # Get user's default organization
+    org_id = None
+    for membership in current_user.organization_memberships:
+        if membership.is_default:
+            org_id = membership.organization_id
+            break
+    
+    # Calculate date range based on period
+    now = datetime.now(timezone.utc)
+    if period == "monthly":
+        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == "yearly":
+        start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:  # all_time
+        start_date = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    
+    # Calculate savings from approved recommendations
+    try:
+        from src.modules.energy.models import Recommendation
+        
+        # Total savings query
+        total_savings_stmt = select(
+            func.coalesce(func.sum(Recommendation.expected_saving_kwh), 0),
+            func.coalesce(func.sum(Recommendation.expected_saving_try), 0),
+        ).where(
+            Recommendation.status == "approved",
+        )
+        if org_id:
+            # Filter by organization through asset
+            from src.modules.real_estate.models import Asset
+            asset_ids_stmt = select(Asset.id).where(Asset.organization_id == org_id)
+            total_savings_stmt = total_savings_stmt.where(
+                Recommendation.asset_id.in_(asset_ids_stmt)
+            )
+        
+        total_result = await db.execute(total_savings_stmt)
+        total_row = total_result.one()
+        total_savings_kwh = float(total_row[0] or 0)
+        total_savings_tl = float(total_row[1] or 0)
+        
+        # Monthly savings query
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly_savings_stmt = select(
+            func.coalesce(func.sum(Recommendation.expected_saving_kwh), 0),
+            func.coalesce(func.sum(Recommendation.expected_saving_try), 0),
+        ).where(
+            Recommendation.status == "approved",
+            Recommendation.updated_at >= month_start,
+        )
+        if org_id:
+            monthly_savings_stmt = monthly_savings_stmt.where(
+                Recommendation.asset_id.in_(asset_ids_stmt)
+            )
+        
+        monthly_result = await db.execute(monthly_savings_stmt)
+        monthly_row = monthly_result.one()
+        monthly_savings_kwh = float(monthly_row[0] or 0)
+        monthly_savings_tl = float(monthly_row[1] or 0)
+        
+        # CO2 reduction calculation
+        # Turkey grid emission factor: ~0.5 kg CO2/kWh
+        co2_factor = 0.5
+        co2_reduction_kg = total_savings_kwh * co2_factor
+        
+        # Tree equivalent (1 tree absorbs ~22 kg CO2/year)
+        tree_equivalent = int(co2_reduction_kg / 22)
+        
+        return SavingsSummaryResponse(
+            savings=SavingsSummary(
+                total_savings_kwh=total_savings_kwh,
+                total_savings_tl=total_savings_tl,
+                monthly_savings_kwh=monthly_savings_kwh,
+                monthly_savings_tl=monthly_savings_tl,
+                co2_reduction_kg=co2_reduction_kg,
+                tree_equivalent=tree_equivalent,
+            ),
+            period=period,
+            currency="TRY",
+        )
+    except Exception as e:
+        # Fallback to zeros if calculation fails
+        from src.core.logging import get_logger
+        logger = get_logger(__name__)
+        logger.warning("Savings calculation error", error=str(e))
+        
+        return SavingsSummaryResponse(
+            savings=SavingsSummary(
+                total_savings_kwh=0.0,
+                total_savings_tl=0.0,
+                monthly_savings_kwh=0.0,
+                monthly_savings_tl=0.0,
+                co2_reduction_kg=0.0,
+                tree_equivalent=0,
+            ),
+            period=period,
+            currency="TRY",
+        )

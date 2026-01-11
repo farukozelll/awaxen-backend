@@ -567,24 +567,26 @@ class IoTService:
             raise ValidationError("Device is not controllable")
         
         # Gateway'e MQTT üzerinden komut gönder
-        # NOT: Gerçek MQTT publish için mqtt_ingestion.mqtt_service kullanılmalı
         gateway = None
         if device.gateway_id:
             gateway = await self.get_gateway_by_id(device.gateway_id)
         
         command_id = uuid.uuid4()
         mqtt_topic = None
+        mqtt_published = False
         
         if gateway:
             mqtt_topic = f"awaxen/gateways/{gateway.serial_number}/command"
-            # TODO: Gerçek MQTT publish
-            # from src.modules.iot.mqtt_ingestion import mqtt_service
-            # await mqtt_service.publish_command(mqtt_topic, {
-            #     "command_id": str(command_id),
-            #     "device_id": device.external_id or str(device.id),
-            #     "action": request.action,
-            #     "parameters": request.parameters,
-            # })
+            
+            # MQTT üzerinden komutu gönder
+            from src.modules.iot.mqtt_ingestion import mqtt_service
+            mqtt_published = await mqtt_service.publish_device_command(
+                gateway_serial=gateway.serial_number,
+                device_id=device.external_id or str(device.id),
+                action=request.action,
+                parameters=request.parameters,
+                command_id=str(command_id),
+            )
         
         logger.info(
             "Device control requested",
@@ -592,10 +594,11 @@ class IoTService:
             action=request.action,
             parameters=request.parameters,
             mqtt_topic=mqtt_topic,
+            mqtt_published=mqtt_published,
         )
         
         return DeviceControlResponse(
-            message=f"Komut gönderildi: {request.action}",
+            message=f"Komut gönderildi: {request.action}" + (" (MQTT)" if mqtt_published else " (Gateway bağlı değil)"),
             device_id=device.id,
             action=request.action,
             success=True,

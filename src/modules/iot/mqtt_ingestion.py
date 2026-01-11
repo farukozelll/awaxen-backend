@@ -254,7 +254,85 @@ class MQTTIngestionService:
         """Handle gateway status message."""
         # Implementation for gateway status updates
         logger.debug("Gateway status received", topic=topic)
+    
+    async def publish_command(
+        self,
+        topic: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """
+        Publish a command to a gateway via MQTT.
+        
+        Args:
+            topic: MQTT topic (e.g., "awaxen/gateways/{serial}/command")
+            payload: Command payload dict
+            
+        Returns:
+            True if published successfully, False otherwise
+        """
+        import orjson
+        
+        if not self._client:
+            logger.warning("MQTT client not connected, cannot publish command")
+            return False
+        
+        try:
+            message = orjson.dumps(payload)
+            await self._client.publish(topic, message, qos=1)
+            
+            logger.info(
+                "MQTT command published",
+                topic=topic,
+                command_id=payload.get("command_id"),
+                action=payload.get("action"),
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(
+                "Failed to publish MQTT command",
+                topic=topic,
+                error=str(e),
+            )
+            return False
+    
+    async def publish_device_command(
+        self,
+        gateway_serial: str,
+        device_id: str,
+        action: str,
+        parameters: dict[str, Any] | None = None,
+        command_id: str | None = None,
+    ) -> bool:
+        """
+        Convenience method to publish a device control command.
+        
+        Args:
+            gateway_serial: Gateway serial number
+            device_id: Device ID (external or internal)
+            action: Action to perform (turn_on, turn_off, set_brightness, etc.)
+            parameters: Optional action parameters
+            command_id: Optional command ID for tracking
+            
+        Returns:
+            True if published successfully
+        """
+        topic = f"awaxen/gateways/{gateway_serial}/command"
+        payload = {
+            "command_id": command_id or str(uuid.uuid4()),
+            "device_id": device_id,
+            "action": action,
+            "parameters": parameters or {},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        
+        return await self.publish_command(topic, payload)
 
 
 # Singleton instance
 mqtt_service = MQTTIngestionService()
+
+
+async def get_mqtt_service() -> MQTTIngestionService:
+    """Get MQTT service singleton (for dependency injection)."""
+    return mqtt_service
