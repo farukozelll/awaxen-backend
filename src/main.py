@@ -52,30 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 # OpenAPI Tags Metadata - Best Practice Gruplandırma
 TAGS_METADATA = [
-    # 🔐 AUTHENTICATION & USERS
-    {"name": "Auth", "description": "🔐 **Kimlik Doğrulama** - Auth0 sync, roller ve yetkiler"},
-    {"name": "Users", "description": "👤 **Kullanıcı Profili** - Profil yönetimi ve onboarding"},
-    {"name": "Admin", "description": "👑 **Admin İşlemleri** - Organizasyon ve kullanıcı yönetimi"},
-    # 🏠 REAL ESTATE & ASSETS
-    {"name": "real-estate", "description": "🏠 **Gayrimenkul** - Asset, Zone ve Tenancy yönetimi"},
-    # 📡 IOT & DEVICES
-    {"name": "IoT", "description": "📡 **IoT Cihazlar** - Gateway pairing, cihaz keşfi ve kontrol"},
-    # ⚡ ENERGY & CORE LOOP
-    {"name": "Energy", "description": "⚡ **Enerji Yönetimi** - Recommendation, Command ve Core Loop"},
-    {"name": "Market", "description": "📈 **Piyasa Verileri** - EPİAŞ elektrik fiyatları"},
-    # 🏆 REWARDS & WALLET
-    {"name": "Rewards", "description": "🏆 **AWX Puanlar** - Bakiye, ledger ve streak bilgileri"},
-    {"name": "Wallet", "description": "💰 **Cüzdan** - AWX puan dağıtımı (internal)"},
-    # 🔧 MAINTENANCE & BILLING
-    {"name": "Maintenance", "description": "🔧 **Bakım** - Arıza bildirimi ve operatör marketplace"},
-    {"name": "Billing", "description": "💳 **Faturalama** - Cüzdan ve işlem geçmişi"},
-    # 📋 COMPLIANCE & NOTIFICATIONS
-    {"name": "Compliance", "description": "📋 **KVKK/GDPR** - Onaylar ve denetim kayıtları"},
-    {"name": "Notifications", "description": "🔔 **Bildirimler** - Push, Telegram, Email"},
-    # 📊 ANALYTICS & SYSTEM
-    {"name": "Dashboard", "description": "📊 **Dashboard** - Özet veriler ve analitikler"},
-    {"name": "SSE", "description": "📡 **Realtime** - Server-Sent Events"},
-    {"name": "health", "description": "❤️ **Sağlık** - Sistem durumu ve metrikler"},
+  {"name": "health", "description": "❤️ **Sağlık** - Sistem durumu ve metrikler"},
 ]
 
 # API Description for Swagger
@@ -364,7 +341,8 @@ def _include_routers(app: FastAPI) -> None:
     """
     from src.modules.auth.router import router as auth_router
     from src.modules.auth.router import users_router
-    from src.modules.admin.router import router as admin_router  # Ayrı Admin modülü
+    from src.modules.auth.tenant_router import tenant_router  # Tenant Management
+    from src.modules.admin import router as admin_router  # Clean Code admin router
     from src.modules.billing.router import router as billing_router
     from src.modules.billing.router import admin_router as billing_admin_router
     from src.modules.iot.router import router as iot_router
@@ -390,6 +368,7 @@ def _include_routers(app: FastAPI) -> None:
     routers = [
         auth_router,      # /api/v1/auth/*
         users_router,     # /api/v1/users/*
+        tenant_router,    # /api/v1/tenant/* - Tenant Management (ayrı tag)
         admin_router,     # /api/v1/admin/*
         dashboard_router,
         notifications_router,

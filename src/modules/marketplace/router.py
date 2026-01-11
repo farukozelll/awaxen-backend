@@ -31,7 +31,7 @@ from src.modules.marketplace.service import (
     JobProofService,
 )
 
-router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
+router = APIRouter(prefix="/maintenance", tags=["54. 🛠️ Maintenance"])
 
 
 # === Alarms ===

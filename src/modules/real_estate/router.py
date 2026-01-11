@@ -30,7 +30,7 @@ from src.modules.real_estate.schemas import (
     HandoverClaim,
 )
 
-router = APIRouter(prefix="/real-estate", tags=["real-estate"])
+router = APIRouter(prefix="/real-estate", tags=["20. 🏠 Real Estate"])
 
 
 # ============== Assets ==============

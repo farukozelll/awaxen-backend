@@ -1,12 +1,15 @@
 """
 Admin Module - System Administration
-Separated from Auth for clean domain boundaries.
 
-This module handles:
-- Organization lifecycle (create, suspend, delete, transfer ownership)
-- User management (global search, ban, revoke sessions)
-- System health and status
-- Role and permission management
+Clean Code Structure:
+├── router.py      → Ana router (alt router'ları birleştirir)
+├── service.py     → İş mantığı (AdminService)
+├── dependencies.py → Dependency injection
+└── routes/        → Endpoint dosyaları
+    ├── organizations.py
+    ├── users.py
+    ├── system.py
+    └── billing.py
 """
 from src.modules.admin.router import router
 

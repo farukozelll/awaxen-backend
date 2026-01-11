@@ -37,8 +37,8 @@ from src.modules.billing.schemas import (
     WalletWithTransactions,
 )
 
-router = APIRouter(prefix="/billing", tags=["Billing"])
-admin_router = APIRouter(prefix="/admin", tags=["Admin - Billing"])
+router = APIRouter(prefix="/billing", tags=["40. 💳 Billing"])
+admin_router = APIRouter(prefix="/admin", tags=["15. 👑 Admin - Rewards"])
 
 
 # ============== User Personal Wallet (AWX) ==============

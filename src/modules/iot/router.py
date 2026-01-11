@@ -44,7 +44,7 @@ from src.modules.iot.schemas import (
     TelemetryQuery,
 )
 
-router = APIRouter(prefix="/iot", tags=["IoT"])
+router = APIRouter(prefix="/iot", tags=["21. 📡 IoT"])
 
 
 # ============== Gateways ==============

@@ -17,7 +17,7 @@ from src.modules.compliance.schemas import (
 )
 from src.modules.compliance.service import ConsentService, AuditLogService
 
-router = APIRouter(prefix="/consents", tags=["Compliance"])
+router = APIRouter(prefix="/consents", tags=["52. 📜 Compliance"])
 
 
 @router.get("", response_model=ConsentListResponse)
@@ -110,7 +110,7 @@ async def revoke_consent(
 
 
 # Admin routes for audit logs
-audit_router = APIRouter(prefix="/audit", tags=["Admin"])
+audit_router = APIRouter(prefix="/audit", tags=["14. 👑 Admin - Audit"])
 
 
 @audit_router.get("/logs", response_model=AuditLogListResponse)

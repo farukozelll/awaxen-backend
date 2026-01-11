@@ -461,10 +461,19 @@ class AuthService:
         """
         Auth0 kullanıcısını Postgres ile senkronize et (Upsert).
         İlk girişte kullanıcı, organizasyon ve cüzdan oluşturulur.
+        
+        Davetiye Akışı:
+        1. Kullanıcı oluşturulur/güncellenir
+        2. Bekleyen davetiyeler kontrol edilir
+        3. Davetiye varsa, kullanıcı ilgili organizasyona eklenir
+        4. Davetiye yoksa, varsayılan organizasyon oluşturulur
         """
+        from src.modules.auth.models import Invitation
+        
         # Mevcut kullanıcıyı kontrol et
         user = await self.get_user_by_auth0_id(request.auth0_id)
         is_new = user is None
+        invitation_consumed = False
         
         if is_new:
             # Email ile de kontrol et (Auth0 olmadan kayıtlı olabilir)
@@ -485,27 +494,49 @@ class AuthService:
                     email=request.email,
                     full_name=request.name,
                     is_active=True,
-                    is_verified=request.email_verified,  # Auth0'dan gelen doğrulama durumu
+                    is_verified=request.email_verified,
                 )
                 self.db.add(user)
                 await self.db.flush()
                 
-                # Varsayılan organizasyon oluştur
-                org_name = request.name or request.email.split("@")[0]
-                org = await self._create_organization_for_user(
-                    user=user,
-                    org_name=f"{org_name}'s Organization",
-                )
+                # Bekleyen davetiye var mı kontrol et
+                pending_invitations = await self._get_pending_invitations(request.email)
+                
+                if pending_invitations:
+                    # Davetiyeler varsa, kullanıcıyı ilgili organizasyonlara ekle
+                    for invite in pending_invitations:
+                        await self._consume_invitation(user, invite)
+                        invitation_consumed = True
+                    
+                    logger.info(
+                        "User joined via invitation",
+                        user_id=str(user.id),
+                        invitation_count=len(pending_invitations),
+                    )
+                else:
+                    # Davetiye yoksa, varsayılan organizasyon oluştur
+                    org_name = request.name or request.email.split("@")[0]
+                    org = await self._create_organization_for_user(
+                        user=user,
+                        org_name=f"{org_name}'s Organization",
+                    )
                 
                 logger.info(
                     "New user created via Auth0 sync",
                     user_id=str(user.id),
                     auth0_id=request.auth0_id,
+                    via_invitation=invitation_consumed,
                 )
         else:
             # Mevcut kullanıcıyı güncelle
             if request.name and request.name != user.full_name:
                 user.full_name = request.name
+            
+            # Mevcut kullanıcı için de bekleyen davetiye kontrol et
+            pending_invitations = await self._get_pending_invitations(request.email)
+            for invite in pending_invitations:
+                await self._consume_invitation(user, invite)
+                invitation_consumed = True
         
         # Rol güncelle (eğer belirtilmişse)
         if request.role:
@@ -517,22 +548,96 @@ class AuthService:
         await self.db.commit()
         
         # Kullanıcıyı ilişkileriyle birlikte yeniden yükle
-        # (refresh sadece scalar alanları yükler, ilişkileri yüklemez)
         user = await self.get_user_by_auth0_id(request.auth0_id)
         if not user:
-            # Fallback: email ile dene
             user = await self.get_user_by_email(request.email)
         
         # Response oluştur
         me_response = await self._build_me_response(user)
         org_response = await self._get_default_organization_response(user)
         
+        status = "created" if is_new else "synced"
+        message = "Yeni kullanıcı oluşturuldu" if is_new else "Kullanıcı senkronize edildi"
+        if invitation_consumed:
+            message += " (davetiye ile organizasyona eklendi)"
+        
         return Auth0SyncResponse(
-            status="created" if is_new else "synced",
-            message="Yeni kullanıcı oluşturuldu" if is_new else "Kullanıcı senkronize edildi",
+            status=status,
+            message=message,
             user=me_response,
             organization=org_response,
         )
+    
+    async def _get_pending_invitations(self, email: str) -> list:
+        """Bekleyen davetiyeleri getir."""
+        from src.modules.auth.models import Invitation
+        
+        stmt = (
+            select(Invitation)
+            .where(
+                Invitation.email == email,
+                Invitation.is_used == False,
+                Invitation.expires_at > datetime.now(timezone.utc),
+            )
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def _consume_invitation(self, user: User, invitation) -> None:
+        """
+        Davetiyeyi tüket ve kullanıcıyı organizasyona ekle.
+        """
+        from src.modules.auth.models import Invitation
+        
+        # Kullanıcıyı organizasyona ekle
+        await self._add_user_to_organization(
+            user=user,
+            organization_id=invitation.organization_id,
+            role_code=invitation.role_code,
+        )
+        
+        # Davetiyeyi tüketildi olarak işaretle
+        invitation.is_used = True
+        invitation.used_at = datetime.now(timezone.utc)
+        
+        logger.info(
+            "Invitation consumed",
+            user_id=str(user.id),
+            invitation_id=str(invitation.id),
+            organization_id=str(invitation.organization_id),
+            role=invitation.role_code,
+        )
+    
+    async def _add_user_to_organization(
+        self,
+        user: User,
+        organization_id: uuid.UUID,
+        role_code: str = "user",
+    ) -> None:
+        """Kullanıcıyı organizasyona ekle."""
+        # Rol bul
+        role = await self._get_or_create_role(role_code)
+        
+        # Zaten üye mi kontrol et
+        stmt = select(OrganizationUser).where(
+            OrganizationUser.user_id == user.id,
+            OrganizationUser.organization_id == organization_id,
+        )
+        result = await self.db.execute(stmt)
+        existing = result.scalar_one_or_none()
+        
+        if existing:
+            # Zaten üye, rolü güncelle
+            existing.role_id = role.id
+        else:
+            # Yeni üyelik oluştur
+            org_user = OrganizationUser(
+                user_id=user.id,
+                organization_id=organization_id,
+                role_id=role.id,
+                is_owner=False,
+            )
+            self.db.add(org_user)
     
     async def _update_user_role(self, user: User, role_code: str) -> None:
         """Kullanıcının varsayılan organizasyondaki rolünü güncelle."""
@@ -2543,6 +2648,202 @@ class AuthService:
             "new_owner_id": str(new_owner_user_id),
             "new_owner_email": new_owner.email,
             "message": f"Organizasyon sahipliği '{new_owner.email}' kullanıcısına devredildi",
+        }
+    
+    # =========================================================================
+    # INVITATION MANAGEMENT
+    # =========================================================================
+    
+    async def create_invitation(
+        self,
+        organization_id: uuid.UUID,
+        email: str,
+        role_code: str,
+        invited_by: User,
+        message: str | None = None,
+        expires_hours: int = 48,
+    ) -> "Invitation":
+        """
+        Yeni davetiye oluştur.
+        
+        Güvenlik Kontrolleri:
+        1. Davet eden kişi organizasyonun üyesi olmalı
+        2. Tenant sadece user/device rolü atayabilir
+        3. Aynı email için aktif davetiye varsa hata ver
+        """
+        import secrets
+        from src.modules.auth.models import Invitation
+        
+        # Organizasyonu kontrol et
+        org = await self.get_organization_by_id(organization_id)
+        if not org:
+            raise NotFoundError("Organization", organization_id)
+        
+        # Davet eden kişi organizasyonun üyesi mi?
+        is_member = False
+        is_owner = False
+        for membership in invited_by.organization_memberships:
+            if membership.organization_id == organization_id:
+                is_member = True
+                is_owner = membership.is_owner
+                break
+        
+        if not is_member:
+            raise PermissionDeniedError("Bu organizasyona davet gönderme yetkiniz yok")
+        
+        # Rol kontrolü - tenant sadece user/device atayabilir
+        if role_code not in ["user", "device"]:
+            if not is_owner:
+                raise PermissionDeniedError("Sadece 'user' veya 'device' rolü atayabilirsiniz")
+        
+        # Aynı email için aktif davetiye var mı?
+        existing = await self._get_pending_invitations(email)
+        for inv in existing:
+            if inv.organization_id == organization_id:
+                raise ConflictError(
+                    f"Bu email için zaten aktif bir davetiye var (expires: {inv.expires_at})"
+                )
+        
+        # Token oluştur
+        token = secrets.token_urlsafe(32)
+        
+        # Davetiye oluştur
+        invitation = Invitation(
+            email=email,
+            token=token,
+            organization_id=organization_id,
+            role_code=role_code,
+            invited_by_id=invited_by.id,
+            message=message,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_hours),
+        )
+        self.db.add(invitation)
+        await self.db.commit()
+        await self.db.refresh(invitation)
+        
+        logger.info(
+            "Invitation created",
+            invitation_id=str(invitation.id),
+            email=email,
+            organization_id=str(organization_id),
+            role=role_code,
+            invited_by=invited_by.email,
+        )
+        
+        return invitation
+    
+    async def get_organization_invitations(
+        self,
+        organization_id: uuid.UUID,
+        include_used: bool = False,
+    ) -> list:
+        """Organizasyonun davetiyelerini listele."""
+        from src.modules.auth.models import Invitation
+        
+        stmt = (
+            select(Invitation)
+            .options(
+                selectinload(Invitation.organization),
+                selectinload(Invitation.invited_by),
+            )
+            .where(Invitation.organization_id == organization_id)
+            .order_by(Invitation.created_at.desc())
+        )
+        
+        if not include_used:
+            stmt = stmt.where(
+                Invitation.is_used == False,
+                Invitation.expires_at > datetime.now(timezone.utc),
+            )
+        
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def validate_invitation(self, token: str) -> dict:
+        """
+        Davetiye token'ını doğrula.
+        
+        Frontend, kullanıcı linke tıkladığında bu endpoint'i çağırır.
+        """
+        from src.modules.auth.models import Invitation
+        
+        stmt = (
+            select(Invitation)
+            .options(selectinload(Invitation.organization))
+            .where(Invitation.token == token)
+        )
+        result = await self.db.execute(stmt)
+        invitation = result.scalar_one_or_none()
+        
+        if not invitation:
+            return {
+                "valid": False,
+                "message": "Davetiye bulunamadı",
+            }
+        
+        if invitation.is_used:
+            return {
+                "valid": False,
+                "message": "Bu davetiye zaten kullanılmış",
+            }
+        
+        if invitation.expires_at < datetime.now(timezone.utc):
+            return {
+                "valid": False,
+                "message": "Bu davetiyenin süresi dolmuş",
+            }
+        
+        return {
+            "valid": True,
+            "message": "Davetiye geçerli",
+            "organization_name": invitation.organization.name if invitation.organization else None,
+            "organization_slug": invitation.organization.slug if invitation.organization else None,
+            "role": invitation.role_code,
+            "email": invitation.email,
+            "expires_at": invitation.expires_at,
+        }
+    
+    async def revoke_invitation(self, invitation_id: uuid.UUID, revoked_by: User) -> dict:
+        """Davetiyeyi iptal et."""
+        from src.modules.auth.models import Invitation
+        
+        stmt = (
+            select(Invitation)
+            .options(selectinload(Invitation.organization))
+            .where(Invitation.id == invitation_id)
+        )
+        result = await self.db.execute(stmt)
+        invitation = result.scalar_one_or_none()
+        
+        if not invitation:
+            raise NotFoundError("Invitation", invitation_id)
+        
+        # Yetki kontrolü - organizasyon üyesi mi?
+        is_authorized = False
+        for membership in revoked_by.organization_memberships:
+            if membership.organization_id == invitation.organization_id:
+                is_authorized = True
+                break
+        
+        if not is_authorized:
+            raise PermissionDeniedError("Bu davetiyeyi iptal etme yetkiniz yok")
+        
+        # Davetiyeyi sil
+        await self.db.delete(invitation)
+        await self.db.commit()
+        
+        logger.info(
+            "Invitation revoked",
+            invitation_id=str(invitation_id),
+            email=invitation.email,
+            revoked_by=revoked_by.email,
+        )
+        
+        return {
+            "status": "revoked",
+            "invitation_id": str(invitation_id),
+            "email": invitation.email,
+            "message": f"'{invitation.email}' için davetiye iptal edildi",
         }
 
 

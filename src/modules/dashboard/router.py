@@ -18,7 +18,7 @@ from src.modules.dashboard.schemas import DashboardSummaryResponse, SavingsSumma
 from src.modules.dashboard.service import DashboardService
 
 
-router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+router = APIRouter(prefix="/dashboard", tags=["50. 📊 Dashboard"])
 
 
 async def get_dashboard_service(

@@ -729,3 +729,109 @@ class OrganizationModule(Base):
         "Organization",
         back_populates="modules",
     )
+
+
+class Invitation(Base):
+    """
+    Kullanıcı davetiye modeli.
+    
+    Akış:
+    1. Tenant Admin, bir email'e davetiye gönderir
+    2. Davetiye token'ı oluşturulur ve email gönderilir
+    3. Kullanıcı linke tıklar ve Auth0 ile giriş yapar
+    4. /auth/sync sırasında bekleyen davetiye kontrol edilir
+    5. Kullanıcı organizasyona eklenir, davetiye tüketilir
+    
+    Güvenlik:
+    - Token unique ve tahmin edilemez olmalı (secrets.token_urlsafe)
+    - Süre sınırı olmalı (48 saat)
+    - Tenant sadece kendi org'una davet edebilir
+    - Tenant sadece user/device rolü atayabilir (admin değil)
+    """
+    __tablename__ = "invitation"
+    
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    
+    # Davet edilen email
+    email: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+        comment="Davet edilen kullanıcının email adresi",
+    )
+    
+    # Güvenli token (URL'de kullanılacak)
+    token: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        index=True,
+        nullable=False,
+        comment="Davetiye doğrulama token'ı",
+    )
+    
+    # Hangi organizasyona davet ediliyor?
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Hangi rol ile davet ediliyor?
+    role_code: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="user",
+        comment="Atanacak rol: user, device (tenant sadece bunları atayabilir)",
+    )
+    
+    # Kim davet etti?
+    invited_by_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Daveti gönderen kullanıcı",
+    )
+    
+    # Davetiye durumu
+    is_used: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Davetiye kullanıldı mı?",
+    )
+    
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Davetiyenin kullanıldığı tarih",
+    )
+    
+    # Süre sınırı
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        comment="Davetiye son geçerlilik tarihi",
+    )
+    
+    # Opsiyonel mesaj
+    message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Davetiye ile gönderilen kişisel mesaj",
+    )
+    
+    # Relationships
+    organization: Mapped["Organization"] = relationship(
+        "Organization",
+        foreign_keys=[organization_id],
+    )
+    
+    invited_by: Mapped["User"] = relationship(
+        "User",
+        foreign_keys=[invited_by_id],
+    )

@@ -41,7 +41,7 @@ from src.modules.energy.service import (
     StreakService,
 )
 
-router = APIRouter(prefix="/energy", tags=["Energy"])
+router = APIRouter(prefix="/energy", tags=["30. ⚡ Energy"])
 
 
 # === Recommendations ===
@@ -224,7 +224,7 @@ async def submit_execution_proof(
 
 # === Rewards ===
 
-rewards_router = APIRouter(prefix="/rewards", tags=["Rewards"])
+rewards_router = APIRouter(prefix="/rewards", tags=["31. 🎁 Rewards"])
 
 
 @rewards_router.get("/balance", response_model=RewardBalanceResponse)
@@ -275,7 +275,7 @@ async def get_user_streaks(
 
 # === Wallet/Rewards Distribution (Internal) ===
 
-wallet_router = APIRouter(prefix="/wallet", tags=["Wallet"])
+wallet_router = APIRouter(prefix="/wallet", tags=["32. 💰 Wallet"])
 
 
 @wallet_router.post("/rewards/distribute", response_model=RewardDistributeResponse)
@@ -330,7 +330,7 @@ async def distribute_rewards(
 # NOT: Fiyat verileri Market tag'i altında toplanır.
 # Integrations modülü sadece API key yönetimi ve bağlantı testi içindir.
 
-epias_router = APIRouter(prefix="/epias", tags=["Market"])
+epias_router = APIRouter(prefix="/epias", tags=["33. 📈 Market"])
 
 
 @epias_router.get("/prices/current", response_model=EpiasPriceResponse)
@@ -484,7 +484,7 @@ async def get_price_history(
 
 # === Core Loop Endpoints ===
 
-core_loop_router = APIRouter(prefix="/core-loop", tags=["Energy"])
+core_loop_router = APIRouter(prefix="/core-loop", tags=["30. ⚡ Energy"])
 
 
 @core_loop_router.get("/status/{asset_id}", response_model=CoreLoopStatusResponse)

@@ -36,7 +36,7 @@ from src.modules.notifications.schemas import (
 from src.modules.notifications.service import NotificationService
 
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+router = APIRouter(prefix="/notifications", tags=["51. 🔔 Notifications"])
 
 
 # ============== Dependencies ==============

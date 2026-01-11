@@ -40,6 +40,10 @@ from src.modules.auth.schemas import (
     CreateOrganizationStep2Response,
     CreateOrganizationWithUserRequest,
     CreateOrganizationWithUserResponse,
+    InvitationCreateRequest,
+    InvitationListResponse,
+    InvitationResponse,
+    InvitationValidateResponse,
     MeResponse,
     OnboardingRequest,
     OnboardingResponse,
@@ -63,8 +67,8 @@ AUTH0_ROLE_MAPPING = {
 # ============================================================
 # L7 Best Practice: Auth modülü SADECE kimlik doğrulama yapar.
 # Admin işlemleri ayrı Admin modülünde (/api/v1/admin/*).
-router = APIRouter(prefix="/auth", tags=["Auth"])
-users_router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(prefix="/auth", tags=["01. 🔐 Auth"])
+users_router = APIRouter(prefix="/users", tags=["02. 👤 Profile"])
 
 
 # ============================================================
@@ -297,7 +301,40 @@ async def complete_onboarding(
 
 
 # ============================================================
-# NOT: Admin endpoint'leri artık ayrı Admin modülünde.
+# INVITATION ENDPOINTS
+# ============================================================
+
+@router.get(
+    "/invitation/{token}",
+    response_model=InvitationValidateResponse,
+    summary="Davetiye Doğrula",
+    description="""
+Davetiye token'ını doğrular.
+
+Frontend, kullanıcı davet linkine tıkladığında bu endpoint'i çağırır.
+Geçerli ise organizasyon bilgisini gösterir.
+
+**Akış:**
+1. Kullanıcı linke tıklar: `https://app.awaxen.com/join?token=XYZ`
+2. Frontend bu endpoint'i çağırır
+3. Geçerli ise "Ülker Gıda'ya katılmak üzeresin" mesajı gösterilir
+4. Kullanıcı Auth0 ile giriş yapar
+5. /auth/sync sırasında davetiye otomatik tüketilir
+    """,
+)
+async def validate_invitation(
+    token: str,
+    auth_service: AuthServiceDep,
+) -> InvitationValidateResponse:
+    """Davetiye token'ını doğrula (public endpoint)."""
+    result = await auth_service.validate_invitation(token)
+    return InvitationValidateResponse(**result)
+
+
+# ============================================================
+# NOT: Tenant endpoint'leri ayrı tenant_router.py'de.
+# main.py'de ayrı olarak include edilir.
+# Admin endpoint'leri ayrı Admin modülünde.
 # /api/v1/admin/* -> src/modules/admin/router.py
 # L7 Best Practice: Separation of Concerns
 # ============================================================

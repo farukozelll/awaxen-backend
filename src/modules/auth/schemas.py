@@ -813,6 +813,85 @@ class ImpersonateUserResponse(BaseModel):
     admin_user_id: uuid.UUID
 
 
+# =============================================================================
+# INVITATION SCHEMAS
+# =============================================================================
+
+class InvitationCreateRequest(BaseModel):
+    """
+    Kullanıcı davet etme isteği.
+    
+    Tenant Admin, kendi organizasyonuna kullanıcı davet edebilir.
+    Sadece 'user' veya 'device' rolü atayabilir (güvenlik).
+    """
+    email: EmailStr = Field(..., description="Davet edilecek kullanıcının email adresi")
+    role: str = Field(
+        "user",
+        pattern="^(user|device)$",
+        description="Atanacak rol (tenant sadece user/device atayabilir)",
+    )
+    message: str | None = Field(
+        None,
+        max_length=500,
+        description="Davetiye ile gönderilecek kişisel mesaj",
+    )
+    expires_hours: int = Field(
+        48,
+        ge=1,
+        le=168,
+        description="Davetiye geçerlilik süresi (saat, max 7 gün)",
+    )
+
+
+class InvitationResponse(BaseModel):
+    """Davetiye bilgisi."""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: uuid.UUID
+    email: str
+    role_code: str
+    organization_id: uuid.UUID
+    organization_name: str | None = None
+    invited_by_email: str | None = None
+    is_used: bool
+    expires_at: datetime
+    created_at: datetime
+    message: str | None = None
+
+
+class InvitationListResponse(BaseModel):
+    """Davetiye listesi."""
+    items: list[InvitationResponse]
+    total: int
+
+
+class InvitationValidateResponse(BaseModel):
+    """
+    Davetiye doğrulama yanıtı.
+    
+    Frontend, kullanıcı linke tıkladığında bu endpoint'i çağırır.
+    Geçerli ise organizasyon bilgisini gösterir.
+    """
+    valid: bool
+    message: str
+    organization_name: str | None = None
+    organization_slug: str | None = None
+    role: str | None = None
+    email: str | None = None
+    expires_at: datetime | None = None
+
+
+class InvitationAcceptRequest(BaseModel):
+    """
+    Davetiye kabul etme isteği.
+    
+    NOT: Bu endpoint normalde kullanılmaz.
+    Davetiye, /auth/sync sırasında otomatik olarak tüketilir.
+    Bu endpoint, manuel kabul için (edge case).
+    """
+    token: str = Field(..., description="Davetiye token'ı")
+
+
 # Forward references
 UserWithOrganizations.model_rebuild()
 OrganizationWithMembers.model_rebuild()

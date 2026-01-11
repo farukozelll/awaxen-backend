@@ -12,7 +12,7 @@ from src.core.auth0 import Auth0User, get_current_user_auth0
 from src.modules.integrations.epias import get_epias_service
 from src.modules.integrations.weather import TURKISH_CITIES, get_weather_service
 
-router = APIRouter(prefix="/integrations", tags=["integrations"])
+router = APIRouter(prefix="/integrations", tags=["53. 🔗 Integrations"])
 
 
 # ============================================

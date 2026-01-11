@@ -22,7 +22,7 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/sse", tags=["SSE"])
+router = APIRouter(prefix="/sse", tags=["55. 📡 SSE"])
 
 
 async def event_generator(
