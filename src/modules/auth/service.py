@@ -157,9 +157,9 @@ class AuthService:
         user: User,
         org_name: str,
     ) -> Organization:
-        """Create an organization and add user as admin."""
+        """Create an organization and add user as tenant."""
         # Generate slug from name
-        slug = org_name.lower().replace(" ", "-")
+        slug = org_name.lower().replace(" ", "-").replace("'", "")
         
         # Check if slug exists
         existing = await self.get_organization_by_slug(slug)
@@ -183,7 +183,35 @@ class AuthService:
         )
         self.db.add(membership)
         
+        # Add default modules to organization
+        await self._add_default_modules_to_organization(org.id)
+        
         return org
+    
+    async def _add_default_modules_to_organization(self, organization_id: uuid.UUID) -> None:
+        """Add default modules to a new organization."""
+        from src.modules.auth.models import ModuleType
+        
+        # Default modules for new organizations
+        default_modules = [
+            ModuleType.CORE.value,
+            ModuleType.ASSET_MANAGEMENT.value,
+            ModuleType.IOT.value,
+            ModuleType.TELEMETRY.value,
+            ModuleType.DASHBOARD.value,
+            ModuleType.NOTIFICATIONS.value,
+        ]
+        
+        now = datetime.now(timezone.utc)
+        
+        for module_code in default_modules:
+            org_module = OrganizationModule(
+                organization_id=organization_id,
+                module_code=module_code,
+                is_active=True,
+                activated_at=now,
+            )
+            self.db.add(org_module)
     
     async def _get_or_create_role(self, role_code: str) -> Role:
         """
@@ -801,7 +829,7 @@ class AuthService:
         request: CreateOrganizationWithUserRequest,
     ) -> CreateOrganizationWithUserResponse:
         """
-        Tab 1: Organizasyon ve ilk kullanıcı (tenant owner) birlikte oluşturma.
+        Tab 1: Organizasyon ve ilk kullanıcı (tenant) birlikte oluşturma.
         Organizasyon oluşturulur ve belirtilen kullanıcı tenant rolüyle eklenir.
         """
         # Slug oluştur
@@ -1946,52 +1974,52 @@ class AuthService:
             "message": f"Organizasyon '{org.name}' yeniden aktifleştirildi",
         }
     
-    async def transfer_organization_ownership(
+    async def transfer_tenant_role(
         self,
         org_id: uuid.UUID,
-        new_owner_user_id: uuid.UUID,
+        new_tenant_user_id: uuid.UUID,
     ) -> dict:
         """
-        Transfer organization ownership to another user (Admin only).
+        Transfer tenant role to another user (Admin only).
         
-        Şirketin IT müdürü işten ayrıldığında tenant admin yetkisini
+        Şirketin IT müdürü işten ayrıldığında tenant yetkisini
         başka bir kullanıcıya devretmek için kullanılır.
         """
         org = await self.get_organization_by_id(org_id)
         if not org:
             raise NotFoundError("Organization", org_id)
         
-        new_owner = await self.get_user_by_id(new_owner_user_id)
-        if not new_owner:
-            raise NotFoundError("User", new_owner_user_id)
+        new_tenant = await self.get_user_by_id(new_tenant_user_id)
+        if not new_tenant:
+            raise NotFoundError("User", new_tenant_user_id)
         
         # Get tenant role
         tenant_role = await self._get_or_create_tenant_role()
         
-        # Find current owner (tenant role with is_default=True)
-        current_owner_membership = None
-        new_owner_membership = None
+        # Find current tenant (tenant role with is_default=True)
+        current_tenant_membership = None
+        new_tenant_membership = None
         
         for m in org.members:
             if m.role_id == tenant_role.id and m.is_default:
-                current_owner_membership = m
-            if m.user_id == new_owner_user_id:
-                new_owner_membership = m
+                current_tenant_membership = m
+            if m.user_id == new_tenant_user_id:
+                new_tenant_membership = m
         
-        # Demote current owner to user role
-        if current_owner_membership:
+        # Demote current tenant to user role
+        if current_tenant_membership:
             user_role = await self._get_or_create_role(RoleType.USER.value)
-            current_owner_membership.role_id = user_role.id
-            current_owner_membership.is_default = False
+            current_tenant_membership.role_id = user_role.id
+            current_tenant_membership.is_default = False
         
-        # Promote new owner to tenant role
-        if new_owner_membership:
-            new_owner_membership.role_id = tenant_role.id
-            new_owner_membership.is_default = True
+        # Promote new user to tenant role
+        if new_tenant_membership:
+            new_tenant_membership.role_id = tenant_role.id
+            new_tenant_membership.is_default = True
         else:
-            # Add new owner to organization
+            # Add new tenant to organization
             new_membership = OrganizationUser(
-                user_id=new_owner_user_id,
+                user_id=new_tenant_user_id,
                 organization_id=org_id,
                 role_id=tenant_role.id,
                 is_default=True,
@@ -2002,18 +2030,18 @@ class AuthService:
         await self.db.commit()
         
         logger.info(
-            "Organization ownership transferred",
+            "Tenant role transferred",
             org_id=str(org_id),
-            new_owner_id=str(new_owner_user_id),
+            new_tenant_id=str(new_tenant_user_id),
         )
         
         return {
             "status": "transferred",
             "organization_id": str(org_id),
             "organization_name": org.name,
-            "new_owner_id": str(new_owner_user_id),
-            "new_owner_email": new_owner.email,
-            "message": f"Organizasyon sahipliği '{new_owner.email}' kullanıcısına devredildi",
+            "new_tenant_id": str(new_tenant_user_id),
+            "new_tenant_email": new_tenant.email,
+            "message": f"Tenant yetkisi '{new_tenant.email}' kullanıcısına devredildi",
         }
     
     async def revoke_user_sessions(
@@ -2572,90 +2600,90 @@ class AuthService:
             "message": f"'{user.email}' kullanıcısının tüm oturumları sonlandırıldı",
         }
     
-    # ============== Enhanced Transfer Ownership ==============
+    # ============== Enhanced Transfer Tenant Role ==============
     
-    async def transfer_organization_ownership_validated(
+    async def transfer_tenant_role_validated(
         self,
         org_id: uuid.UUID,
-        new_owner_user_id: uuid.UUID,
+        new_tenant_user_id: uuid.UUID,
     ) -> dict:
         """
-        Transfer organization ownership with validation (Admin only).
+        Transfer tenant role with validation (Admin only).
         
         Validasyonlar:
-        1. Yeni sahip organizasyonun mevcut üyesi mi?
-        2. Yeni sahip aktif mi?
+        1. Yeni tenant organizasyonun mevcut üyesi mi?
+        2. Yeni tenant aktif mi?
         
         İşlemler:
-        1. Eski sahip tenant_admin → user rolüne düşürülür
-        2. Yeni sahip → tenant_admin rolüne yükseltilir
+        1. Eski tenant → user rolüne düşürülür
+        2. Yeni tenant → tenant rolüne yükseltilir
         3. Audit log kaydı
         """
         org = await self.get_organization_by_id(org_id)
         if not org:
             raise NotFoundError("Organization", org_id)
         
-        new_owner = await self.get_user_by_id(new_owner_user_id)
-        if not new_owner:
-            raise NotFoundError("User", new_owner_user_id)
+        new_tenant = await self.get_user_by_id(new_tenant_user_id)
+        if not new_tenant:
+            raise NotFoundError("User", new_tenant_user_id)
         
-        if not new_owner.is_active:
-            raise UnauthorizedError("New owner must be an active user")
+        if not new_tenant.is_active:
+            raise UnauthorizedError("New tenant must be an active user")
         
-        # Yeni sahip organizasyonun üyesi mi kontrol et
-        new_owner_membership = None
+        # Yeni tenant organizasyonun üyesi mi kontrol et
+        new_tenant_membership = None
         for m in org.members:
-            if m.user_id == new_owner_user_id:
-                new_owner_membership = m
+            if m.user_id == new_tenant_user_id:
+                new_tenant_membership = m
                 break
         
-        if not new_owner_membership:
+        if not new_tenant_membership:
             raise UnauthorizedError(
-                f"User {new_owner.email} is not a member of organization {org.name}. "
-                "New owner must be an existing member."
+                f"User {new_tenant.email} is not a member of organization {org.name}. "
+                "New tenant must be an existing member."
             )
         
         # Get tenant role
         tenant_role = await self._get_or_create_tenant_role()
         user_role = await self._get_or_create_role(RoleType.USER.value)
         
-        # Find current owner
-        current_owner_membership = None
-        current_owner_email = None
+        # Find current tenant
+        current_tenant_membership = None
+        current_tenant_email = None
         
         for m in org.members:
             if m.role_id == tenant_role.id:
-                current_owner_membership = m
+                current_tenant_membership = m
                 if m.user:
-                    current_owner_email = m.user.email
+                    current_tenant_email = m.user.email
                 break
         
-        # Demote current owner to user role
-        if current_owner_membership:
-            current_owner_membership.role_id = user_role.id
+        # Demote current tenant to user role
+        if current_tenant_membership:
+            current_tenant_membership.role_id = user_role.id
         
-        # Promote new owner to tenant role
-        new_owner_membership.role_id = tenant_role.id
-        new_owner_membership.is_default = True
+        # Promote new user to tenant role
+        new_tenant_membership.role_id = tenant_role.id
+        new_tenant_membership.is_default = True
         
         await self.db.commit()
         
         logger.info(
-            "Organization ownership transferred (validated)",
+            "Tenant role transferred (validated)",
             org_id=str(org_id),
             org_name=org.name,
-            old_owner_email=current_owner_email,
-            new_owner_email=new_owner.email,
+            old_tenant_email=current_tenant_email,
+            new_tenant_email=new_tenant.email,
         )
         
         return {
             "status": "transferred",
             "organization_id": str(org_id),
             "organization_name": org.name,
-            "old_owner_email": current_owner_email,
-            "new_owner_id": str(new_owner_user_id),
-            "new_owner_email": new_owner.email,
-            "message": f"Organizasyon sahipliği '{new_owner.email}' kullanıcısına devredildi",
+            "old_tenant_email": current_tenant_email,
+            "new_tenant_id": str(new_tenant_user_id),
+            "new_tenant_email": new_tenant.email,
+            "message": f"Tenant yetkisi '{new_tenant.email}' kullanıcısına devredildi",
         }
     
     # =========================================================================
@@ -2689,11 +2717,12 @@ class AuthService:
         
         # Davet eden kişi organizasyonun üyesi mi?
         is_member = False
-        is_owner = False
+        is_tenant = False
         for membership in invited_by.organization_memberships:
             if membership.organization_id == organization_id:
                 is_member = True
-                is_owner = membership.is_owner
+                if membership.role and membership.role.code == "tenant":
+                    is_tenant = True
                 break
         
         if not is_member:
@@ -2701,7 +2730,7 @@ class AuthService:
         
         # Rol kontrolü - tenant sadece user/device atayabilir
         if role_code not in ["user", "device"]:
-            if not is_owner:
+            if not is_tenant:
                 raise PermissionDeniedError("Sadece 'user' veya 'device' rolü atayabilirsiniz")
         
         # Aynı email için aktif davetiye var mı?

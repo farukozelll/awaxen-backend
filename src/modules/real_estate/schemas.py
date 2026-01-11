@@ -274,7 +274,7 @@ class AssetMembershipCreate(BaseModel):
     """Schema for creating asset membership."""
     asset_id: uuid.UUID
     user_id: uuid.UUID
-    relation: str = Field(..., description="owner/tenant/agent/operator_view")
+    relation: str = Field(..., description="tenant/agent")
     scopes: list[str] = Field(default_factory=list)
 
 
