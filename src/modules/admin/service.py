@@ -760,7 +760,7 @@ class AdminService:
             self.db.add(user)
             await self.db.flush()
         
-        role = await self._get_or_create_role(request.role)
+        role = await self._get_or_create_role(request.role_code)
         
         membership = OrganizationUser(
             user_id=user.id,
@@ -778,14 +778,14 @@ class AdminService:
             "User added to organization",
             user_id=str(user.id),
             org_id=str(org.id),
-            role=request.role,
+            role=request.role_code,
         )
         
         return AddUserToOrganizationResponse(
             message="Kullanıcı organizasyona eklendi",
             user=UserResponse.model_validate(user),
             organization=OrganizationResponse.model_validate(org),
-            role=request.role,
+            role=request.role_code,
         )
     
     async def assign_role_to_user(self, user_id: str, request) -> AssignRoleToUserResponse:

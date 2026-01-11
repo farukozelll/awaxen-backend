@@ -663,7 +663,7 @@ class AddUserToOrganizationRequest(BaseModel):
     email: EmailStr
     full_name: str | None = None
     phone: str | None = None
-    role: str = Field(default="tenant", examples=["tenant", "user"])
+    role_code: str = Field(default="user", examples=["tenant", "user"])
 
 
 class AddUserToOrganizationResponse(BaseModel):
