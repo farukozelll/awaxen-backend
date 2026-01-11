@@ -41,7 +41,8 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://redis:6379/0", description="Redis connection URL")
 
     # MQTT - IoT (Shelly devices)
-    mqtt_broker_url: str = Field(default="mqtt", alias="MQTT_BROKER_URL", description="MQTT Broker hostname")
+    mqtt_broker_host: str = Field(default="mqtt", alias="MQTT_BROKER_HOST", description="MQTT Broker hostname")
+    mqtt_broker_url: str = Field(default="mqtt", alias="MQTT_BROKER_URL", description="MQTT Broker hostname (alias)")
     mqtt_broker_port: int = Field(default=1883, description="MQTT Broker port")
     mqtt_username: str = Field(default="awaxen_admin", description="MQTT username")
     mqtt_password: str = Field(default="", description="MQTT password")

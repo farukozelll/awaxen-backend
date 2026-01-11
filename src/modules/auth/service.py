@@ -239,10 +239,16 @@ class AuthService:
         return result.scalar_one_or_none()
     
     async def get_user_by_email(self, email: str) -> User | None:
-        """Get user by email."""
+        """Get user by email with all relationships loaded."""
+        from src.modules.auth.models import OrganizationUser
         stmt = (
             select(User)
-            .options(selectinload(User.organization_memberships))
+            .options(
+                selectinload(User.organization_memberships)
+                .selectinload(OrganizationUser.role),
+                selectinload(User.organization_memberships)
+                .selectinload(OrganizationUser.organization),
+            )
             .where(User.email == email)
         )
         result = await self.db.execute(stmt)
@@ -469,6 +475,9 @@ class AuthService:
                 user.auth0_id = request.auth0_id
                 if request.name and not user.full_name:
                     user.full_name = request.name
+                # Email doğrulama durumunu güncelle
+                if request.email_verified:
+                    user.is_verified = True
             else:
                 # Yeni kullanıcı oluştur
                 user = User(
@@ -476,7 +485,7 @@ class AuthService:
                     email=request.email,
                     full_name=request.name,
                     is_active=True,
-                    is_verified=True,  # Auth0 ile doğrulanmış
+                    is_verified=request.email_verified,  # Auth0'dan gelen doğrulama durumu
                 )
                 self.db.add(user)
                 await self.db.flush()
@@ -506,7 +515,13 @@ class AuthService:
         user.last_login = datetime.now(timezone.utc)
         
         await self.db.commit()
-        await self.db.refresh(user)
+        
+        # Kullanıcıyı ilişkileriyle birlikte yeniden yükle
+        # (refresh sadece scalar alanları yükler, ilişkileri yüklemez)
+        user = await self.get_user_by_auth0_id(request.auth0_id)
+        if not user:
+            # Fallback: email ile dene
+            user = await self.get_user_by_email(request.email)
         
         # Response oluştur
         me_response = await self._build_me_response(user)

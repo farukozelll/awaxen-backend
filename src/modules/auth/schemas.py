@@ -265,25 +265,30 @@ class Auth0SyncRequest(BaseModel):
     Auth0 kullanıcısını Postgres ile senkronize et.
     İlk girişte kullanıcı ve organizasyon oluşturulur.
     
-    auth0_id ve email body'den veya header'dan gönderilebilir.
+    NOT: Role bilgisi frontend'den gönderilmemeli (güvenlik riski - spoofing).
+    Backend, Auth0 token'ından veya DB'den role belirler.
     """
     auth0_id: str | None = Field(
         None, 
-        description="Auth0 kullanıcı ID'si (body veya X-Auth0-Id header)", 
+        description="Auth0 kullanıcı ID'si", 
         examples=["google-oauth2|123456789"]
     )
     email: EmailStr | None = Field(
         None, 
-        description="Kullanıcı email adresi (body veya X-Auth0-Email header)"
+        description="Kullanıcı email adresi"
     )
     name: str | None = Field(
         None, 
         description="Kullanıcı tam adı", 
         examples=["Ahmet Yılmaz"]
     )
+    email_verified: bool = Field(
+        default=False,
+        description="Auth0'dan gelen email doğrulama durumu",
+    )
     role: str | None = Field(
         None,
-        description="Auth0'dan gelen rol kodu (admin, tenant, user, device)",
+        description="Auth0 token'dan gelen rol (backend-to-backend için, frontend gönderemez)",
         examples=["tenant"],
     )
 
