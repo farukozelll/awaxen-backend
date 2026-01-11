@@ -829,9 +829,18 @@ class AuthService:
         request: CreateOrganizationWithUserRequest,
     ) -> CreateOrganizationWithUserResponse:
         """
-        Tab 1: Organizasyon ve ilk kullanıcı (tenant) birlikte oluşturma.
-        Organizasyon oluşturulur ve belirtilen kullanıcı tenant rolüyle eklenir.
+        Organizasyon, kullanıcı ve modülleri tek seferde oluşturma (Atomic Transaction).
+        
+        Akış:
+        1. Organizasyon oluşturulur
+        2. Modüller atanır
+        3. Kullanıcı oluşturulur (hayalet - Auth0 kaydı yok)
+        4. Davetiye oluşturulur ve hoşgeldin maili gönderilir
+        5. In-app bildirim oluşturulur
         """
+        import secrets
+        from src.modules.auth.models import Invitation
+        
         # Slug oluştur
         slug = request.organization_slug
         if not slug:
@@ -847,7 +856,7 @@ class AuthService:
         if existing_user:
             raise ConflictError(f"User with email {request.user_email} already exists")
         
-        # Organizasyon oluştur (detaylı adres ve tip bilgileriyle)
+        # ===== 1. Organizasyon oluştur =====
         org = Organization(
             name=request.organization_name,
             slug=slug,
@@ -856,14 +865,12 @@ class AuthService:
             company_size=request.company_size,
             email=request.organization_email,
             phone=request.organization_phone,
-            # Detaylı adres
             city=request.city,
             district=request.district,
             neighborhood=request.neighborhood,
             street=request.street,
             postal_code=request.postal_code,
             country=request.country,
-            # Koordinatlar
             latitude=request.latitude,
             longitude=request.longitude,
             is_active=True,
@@ -871,7 +878,18 @@ class AuthService:
         self.db.add(org)
         await self.db.flush()
         
-        # Kullanıcı oluştur (first_name + last_name)
+        # ===== 2. Modülleri ata (Atomic) =====
+        now = datetime.now(timezone.utc)
+        for module_code in request.modules:
+            org_module = OrganizationModule(
+                organization_id=org.id,
+                module_code=module_code,
+                is_active=True,
+                activated_at=now,
+            )
+            self.db.add(org_module)
+        
+        # ===== 3. Kullanıcı oluştur (hayalet) =====
         full_name = f"{request.user_first_name} {request.user_last_name}"
         user = User(
             email=request.user_email,
@@ -885,36 +903,98 @@ class AuthService:
         self.db.add(user)
         await self.db.flush()
         
-        # Rol al veya oluştur (varsayılan: tenant)
+        # ===== 4. Rol al ve kullanıcıyı organizasyona ekle =====
         role = await self._get_or_create_role(request.user_role)
         
-        # Kullanıcıyı organizasyona ekle
         membership = OrganizationUser(
             user_id=user.id,
             organization_id=org.id,
             role_id=role.id,
             is_default=True,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=now,
         )
         self.db.add(membership)
         
+        # ===== 5. Davetiye oluştur (hoşgeldin maili için) =====
+        token = secrets.token_urlsafe(32)
+        invitation = Invitation(
+            email=request.user_email,
+            token=token,
+            organization_id=org.id,
+            role_code=request.user_role,
+            invited_by_id=user.id,  # Kendi kendine davet (sistem tarafından)
+            message=f"Hoşgeldiniz! {org.name} organizasyonuna katılmak için hesabınızı oluşturun.",
+            expires_at=now + timedelta(hours=168),  # 7 gün
+            is_used=False,
+        )
+        self.db.add(invitation)
+        
+        # ===== 6. In-app bildirim oluştur =====
+        try:
+            from src.modules.notifications.models import Notification, NotificationType, NotificationPriority
+            
+            welcome_notification = Notification(
+                user_id=user.id,
+                organization_id=org.id,
+                type=NotificationType.SUCCESS.value,
+                priority=NotificationPriority.MEDIUM.value,
+                title="Hoşgeldiniz! 🎉",
+                message=f"{org.name} organizasyonuna hoşgeldiniz. Hesabınızı kurmak için e-postanızı kontrol edin.",
+                is_read=False,
+                channels_sent=["in_app"],
+            )
+            self.db.add(welcome_notification)
+        except Exception as e:
+            logger.warning(f"Could not create welcome notification: {e}")
+        
+        # ===== Commit (Atomic) =====
         await self.db.commit()
         await self.db.refresh(org)
         await self.db.refresh(user)
         await self.db.refresh(role)
         
+        # ===== 7. Hoşgeldin maili gönder (commit sonrası) =====
+        if request.send_welcome_email:
+            try:
+                from src.modules.notifications.service import NotificationService
+                notification_service = NotificationService(self.db)
+                await notification_service.send_invitation_email(
+                    email=request.user_email,
+                    token=token,
+                    org_name=org.name,
+                    invited_by_name="Awaxen Sistem",
+                )
+                logger.info(
+                    "Welcome email sent",
+                    email=request.user_email,
+                    org_name=org.name,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to send welcome email, but organization created",
+                    error=str(e),
+                    email=request.user_email,
+                )
+        
         logger.info(
-            "Organization and user created by admin",
+            "Organization, user and modules created (atomic)",
             org_id=str(org.id),
             user_id=str(user.id),
             role=request.user_role,
+            modules=request.modules,
         )
+        
+        invitation_sent = False
+        if request.send_welcome_email:
+            invitation_sent = True
         
         return CreateOrganizationWithUserResponse(
             message="Organizasyon ve kullanıcı başarıyla oluşturuldu",
             organization=OrganizationResponse.model_validate(org),
             user=UserResponse.model_validate(user),
             role=RoleResponse.model_validate(role),
+            modules=request.modules,
+            invitation_sent=invitation_sent,
         )
     
     async def assign_role(self, request: AssignRoleRequest) -> dict:

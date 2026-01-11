@@ -385,11 +385,14 @@ class UserWalletInfo(BaseModel):
 
 class CreateOrganizationWithUserRequest(BaseModel):
     """
-    Tab 1: Organizasyon ve ilk kullanıcı (tenant owner) birlikte oluşturma.
+    Organizasyon, kullanıcı ve modülleri tek seferde oluşturma (Atomic Transaction).
     
-    Frontend akışı:
-    1. Tab 1: Bu schema ile organization + owner oluşturulur
-    2. Tab 2: OrganizationModulesUpdate ile modüller eklenir
+    Akış:
+    1. Organizasyon oluşturulur
+    2. Modüller atanır
+    3. Kullanıcı oluşturulur (hayalet - Auth0 kaydı yok)
+    4. Davetiye oluşturulur ve hoşgeldin maili gönderilir
+    5. In-app bildirim oluşturulur
     """
     # ===== Organizasyon bilgileri =====
     organization_name: str = Field(..., min_length=2, max_length=255, examples=["Acme Corp"])
@@ -428,7 +431,14 @@ class CreateOrganizationWithUserRequest(BaseModel):
     latitude: float | None = Field(None, description="Enlem", examples=[40.9833])
     longitude: float | None = Field(None, description="Boylam", examples=[29.0333])
     
-    # ===== İlk kullanıcı (Tenant Owner) bilgileri =====
+    # ===== Modüller (Atomic - tek seferde) =====
+    modules: list[str] = Field(
+        default_factory=lambda: ["core", "asset_management", "iot", "telemetry", "dashboard", "notifications"],
+        description="Aktif edilecek modül kodları",
+        examples=[["core", "iot", "energy", "billing", "telemetry", "dashboard"]]
+    )
+    
+    # ===== İlk kullanıcı (Tenant) bilgileri =====
     user_first_name: str = Field(..., min_length=1, max_length=100, examples=["Ahmet"])
     user_last_name: str = Field(..., min_length=1, max_length=100, examples=["Yılmaz"])
     user_email: EmailStr = Field(..., examples=["admin@acme.com"])
@@ -437,6 +447,12 @@ class CreateOrganizationWithUserRequest(BaseModel):
         default="tenant",
         description="Kullanıcının rolü (varsayılan: tenant)",
         examples=["tenant"]
+    )
+    
+    # ===== Bildirim ayarları =====
+    send_welcome_email: bool = Field(
+        default=True,
+        description="Kullanıcıya hoşgeldin maili gönderilsin mi?"
     )
 
 
@@ -458,6 +474,8 @@ class CreateOrganizationWithUserResponse(BaseModel):
     organization: OrganizationResponse
     user: UserResponse
     role: RoleResponse
+    modules: list[str] = Field(default_factory=list, description="Atanan modüller")
+    invitation_sent: bool = Field(default=False, description="Davetiye maili gönderildi mi?")
 
 
 class AssignRoleRequest(BaseModel):
