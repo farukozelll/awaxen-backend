@@ -343,8 +343,6 @@ def _include_routers(app: FastAPI) -> None:
     from src.modules.auth.router import users_router
     from src.modules.auth.tenant_router import tenant_router  # Tenant Management
     from src.modules.admin import router as admin_router  # Clean Code admin router
-    from src.modules.billing.router import router as billing_router
-    from src.modules.billing.router import admin_router as billing_admin_router
     from src.modules.iot.router import router as iot_router
     from src.modules.real_estate.router import router as real_estate_router
     from src.modules.integrations.router import router as integrations_router
@@ -356,7 +354,6 @@ def _include_routers(app: FastAPI) -> None:
     from src.modules.energy.router import rewards_router
     from src.modules.energy.router import epias_router
     from src.modules.energy.router import wallet_router
-    from src.modules.marketplace.router import router as marketplace_router
     from src.modules.sse.router import router as sse_router
     from src.core.metrics import router as metrics_router
     
@@ -374,8 +371,6 @@ def _include_routers(app: FastAPI) -> None:
         notifications_router,
         real_estate_router,
         iot_router,
-        billing_router,
-        billing_admin_router,  # /api/v1/billing/admin/* - Admin wallet operations
         integrations_router,
         compliance_router,
         audit_router,     # /api/v1/audit/* - EKLENDİ!
@@ -383,7 +378,6 @@ def _include_routers(app: FastAPI) -> None:
         rewards_router,
         wallet_router,
         epias_router,
-        marketplace_router,
         sse_router,
     ]
     
@@ -398,8 +392,8 @@ def _include_routers(app: FastAPI) -> None:
         "Routers registered",
         modules=[
             "auth", "dashboard", "notifications", "real_estate", "iot", 
-            "billing", "integrations", "compliance", "energy", "rewards", 
-            "maintenance", "sse", "metrics"
+            "integrations", "compliance", "energy", "rewards", 
+            "sse", "metrics"
         ],
         api_version="v1",
         api_prefix=api_v1_prefix,

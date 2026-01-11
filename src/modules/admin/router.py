@@ -8,7 +8,6 @@ Yapı:
 - routes/organizations.py → Organizasyon CRUD
 - routes/users.py → Kullanıcı yönetimi
 - routes/system.py → Sistem sağlığı
-- routes/billing.py → Faturalama (Fatura/TL)
 - routes/rewards.py → AWX Puan/Wallet yönetimi
 """
 from fastapi import APIRouter
@@ -17,7 +16,6 @@ from src.modules.admin.routes import (
     organizations_router,
     users_router,
     system_router,
-    billing_router,
     rewards_router,
 )
 
@@ -28,5 +26,4 @@ router = APIRouter(prefix="/admin")
 router.include_router(organizations_router)
 router.include_router(users_router)
 router.include_router(system_router)
-router.include_router(billing_router)
 router.include_router(rewards_router)
