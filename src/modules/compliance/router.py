@@ -110,7 +110,7 @@ async def revoke_consent(
 
 
 # Admin routes for audit logs
-audit_router = APIRouter(prefix="/audit", tags=["14. 👑 Admin - Audit"])
+audit_router = APIRouter(prefix="/audit", tags=["13. 👑 Admin - Audit"])
 
 
 @audit_router.get("/logs", response_model=AuditLogListResponse)

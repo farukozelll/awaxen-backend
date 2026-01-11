@@ -4,11 +4,12 @@ Admin Module - Main Router
 Clean Code: Bu dosya sadece alt router'ları birleştirir.
 Hiçbir endpoint burada tanımlanmaz.
 
-Yapı:
-- routes/organizations.py → Organizasyon CRUD
-- routes/users.py → Kullanıcı yönetimi
-- routes/system.py → Sistem sağlığı
-- routes/rewards.py → AWX Puan/Wallet yönetimi
+Swagger Tag Numaraları:
+- 10. 👑 Admin - Organizations
+- 11. 👑 Admin - Users
+- 12. 👑 Admin - System
+- 13. 👑 Admin - Audit (compliance modülünde)
+- 14. 👑 Admin - Rewards
 """
 from fastapi import APIRouter
 

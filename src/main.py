@@ -354,6 +354,7 @@ def _include_routers(app: FastAPI) -> None:
     from src.modules.energy.router import rewards_router
     from src.modules.energy.router import epias_router
     from src.modules.energy.router import wallet_router
+    from src.modules.energy.router import core_loop_router
     from src.modules.sse.router import router as sse_router
     from src.core.metrics import router as metrics_router
     
@@ -378,6 +379,7 @@ def _include_routers(app: FastAPI) -> None:
         rewards_router,
         wallet_router,
         epias_router,
+        core_loop_router,  # Core Loop endpoints
         sse_router,
     ]
     
@@ -391,9 +393,9 @@ def _include_routers(app: FastAPI) -> None:
     logger.info(
         "Routers registered",
         modules=[
-            "auth", "dashboard", "notifications", "real_estate", "iot", 
-            "integrations", "compliance", "energy", "rewards", 
-            "sse", "metrics"
+            "auth", "admin", "tenant", "dashboard", "notifications", 
+            "real_estate", "iot", "integrations", "compliance", 
+            "energy", "rewards", "wallet", "epias", "core_loop", "sse"
         ],
         api_version="v1",
         api_prefix=api_v1_prefix,

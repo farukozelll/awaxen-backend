@@ -2,10 +2,13 @@
 Admin Routes Package
 
 Clean Code: Her dosya tek bir sorumluluk taşır.
-- organizations.py: Organizasyon CRUD
-- users.py: Kullanıcı yönetimi
-- system.py: Sistem sağlığı ve loglar
-- rewards.py: AWX Puan/Wallet yönetimi
+
+Tag Numaraları:
+- 10. 👑 Admin - Organizations (organizations.py)
+- 11. 👑 Admin - Users (users.py)
+- 12. 👑 Admin - System (system.py)
+- 13. 👑 Admin - Audit (compliance/router.py)
+- 14. 👑 Admin - Rewards (rewards.py)
 """
 from src.modules.admin.routes.organizations import router as organizations_router
 from src.modules.admin.routes.users import router as users_router

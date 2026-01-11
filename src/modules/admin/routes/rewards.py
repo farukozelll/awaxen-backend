@@ -2,9 +2,7 @@
 Admin Routes - Rewards
 
 Admin AWX puan ve cüzdan yönetimi.
-NOT: Fatura işlemleri routes/billing.py'de.
-
-Tag: 15. 👑 Admin - Rewards
+Tag: 14. 👑 Admin - Rewards
 """
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
@@ -12,7 +10,7 @@ from typing import Optional
 from src.modules.admin.dependencies import AdminServiceDep
 from src.modules.auth.dependencies import require_role
 
-router = APIRouter(tags=["15. 👑 Admin - Rewards"])
+router = APIRouter(tags=["14. 👑 Admin - Rewards"])
 
 
 @router.get(
