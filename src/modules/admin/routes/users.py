@@ -17,6 +17,9 @@ from src.modules.auth.schemas import (
     ImpersonateUserResponse,
     AddUserToOrganizationRequest,
     AddUserToOrganizationResponse,
+    InvitationCreateRequest,
+    InvitationListResponse,
+    InvitationResponse,
 )
 
 router = APIRouter(tags=["11. 👑 Admin - Users"])
@@ -156,4 +159,117 @@ async def ban_user(
     return await admin_service.ban_user(
         user_id=uuid.UUID(user_id),
         reason=reason,
+    )
+
+
+@router.delete(
+    "/organizations/{org_id}/users/{user_id}",
+    summary="Kullanıcı Çıkar",
+    description="Kullanıcıyı organizasyondan çıkarır (Soft Delete).",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def remove_user_from_organization(
+    org_id: str,
+    user_id: str,
+    admin_service: AdminServiceDep,
+):
+    """Kullanıcıyı organizasyondan çıkar."""
+    return await admin_service.remove_user_from_organization(
+        organization_id=uuid.UUID(org_id),
+        user_id=uuid.UUID(user_id),
+    )
+
+
+# ============== INVITATION ENDPOINTS ==============
+
+
+@router.post(
+    "/organizations/{org_id}/invitations",
+    response_model=InvitationResponse,
+    summary="Davetiye Oluştur (Admin)",
+    description="Admin olarak organizasyona kullanıcı davet eder ve email gönderir.",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def create_invitation(
+    org_id: str,
+    request: InvitationCreateRequest,
+    admin_service: AdminServiceDep,
+    current_user: CurrentUser,
+) -> InvitationResponse:
+    """Admin olarak davetiye oluştur ve email gönder."""
+    invitation = await admin_service.create_invitation(
+        organization_id=uuid.UUID(org_id),
+        email=request.email,
+        role_code=request.role,
+        invited_by=current_user,
+        message=request.message,
+        expires_hours=request.expires_hours,
+    )
+    
+    return InvitationResponse(
+        id=invitation.id,
+        email=invitation.email,
+        role_code=invitation.role_code,
+        organization_id=invitation.organization_id,
+        organization_name=invitation.organization.name if invitation.organization else None,
+        invited_by_email=current_user.email,
+        is_used=invitation.is_used,
+        expires_at=invitation.expires_at,
+        created_at=invitation.created_at,
+        message=invitation.message,
+    )
+
+
+@router.get(
+    "/organizations/{org_id}/invitations",
+    response_model=InvitationListResponse,
+    summary="Davetiyeleri Listele (Admin)",
+    description="Organizasyonun tüm davetiyelerini listeler.",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def list_invitations(
+    org_id: str,
+    admin_service: AdminServiceDep,
+    include_used: bool = False,
+) -> InvitationListResponse:
+    """Organizasyonun davetiyelerini listele."""
+    invitations = await admin_service.get_organization_invitations(
+        organization_id=uuid.UUID(org_id),
+        include_used=include_used,
+    )
+    
+    items = [
+        InvitationResponse(
+            id=inv.id,
+            email=inv.email,
+            role_code=inv.role_code,
+            organization_id=inv.organization_id,
+            organization_name=inv.organization.name if inv.organization else None,
+            invited_by_email=inv.invited_by.email if inv.invited_by else None,
+            is_used=inv.is_used,
+            expires_at=inv.expires_at,
+            created_at=inv.created_at,
+            message=inv.message,
+        )
+        for inv in invitations
+    ]
+    
+    return InvitationListResponse(items=items, total=len(items))
+
+
+@router.delete(
+    "/invitations/{invitation_id}",
+    summary="Davetiye İptal Et (Admin)",
+    description="Bekleyen davetiyeyi iptal eder.",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def revoke_invitation(
+    invitation_id: str,
+    admin_service: AdminServiceDep,
+    current_user: CurrentUser,
+):
+    """Davetiyeyi iptal et."""
+    return await admin_service.revoke_invitation(
+        invitation_id=uuid.UUID(invitation_id),
+        current_user=current_user,
     )

@@ -10,15 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from src.modules.admin.dependencies import AdminServiceDep
 from src.modules.auth.dependencies import require_role
 from src.modules.auth.schemas import (
-    AddUserToOrganizationRequest,
-    AddUserToOrganizationResponse,
     AdminUserListResponse,
     InvitationCreateRequest,
     InvitationListResponse,
     InvitationResponse,
-    OrganizationModulesUpdate,
-    OrganizationModulesUpdateRequest,
-    OrganizationModulesUpdateResponse,
 )
 
 tenant_router = APIRouter(
@@ -54,22 +49,9 @@ async def list_organization_users(
     )
 
 
-@tenant_router.post(
-    "/organizations/{org_id}/users",
-    response_model=AddUserToOrganizationResponse,
-    summary="Kullanıcı Davet Et",
-    description="Organizasyona kullanıcı davet eder.",
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_role(["admin", "tenant"]))],
-)
-async def invite_user_to_organization(
-    org_id: str,
-    request: AddUserToOrganizationRequest,
-    admin_service: AdminServiceDep,
-) -> AddUserToOrganizationResponse:
-    """Kullanıcı davet et."""
-    request.organization_id = org_id
-    return await admin_service.add_user_to_organization(request)
+# NOT: POST /organizations/{org_id}/users kaldırıldı
+# Kullanıcı eklemek için DAİMA /invitations endpoint'i kullanılmalı
+# Bu endpoint direkt DB'ye yazıyordu, davetiye akışını atlıyordu
 
 
 @tenant_router.post(
@@ -187,20 +169,40 @@ async def revoke_invitation(
     return result
 
 
-@tenant_router.put(
-    "/organizations/{org_id}/modules",
-    response_model=OrganizationModulesUpdateResponse,
-    summary="Modülleri Güncelle",
-    description="Organizasyonun modüllerini günceller.",
+# NOT: PUT /organizations/{org_id}/modules kaldırıldı
+# Modül yönetimi sadece Admin tarafından yapılabilir
+# Admin endpoint: PUT /api/v1/admin/organizations/{org_id}/modules
+
+
+@tenant_router.delete(
+    "/organizations/{org_id}/users/{user_id}",
+    summary="Kullanıcı Çıkar",
+    description="Kullanıcıyı organizasyondan çıkarır (Soft Delete).",
     dependencies=[Depends(require_role(["admin", "tenant"]))],
 )
-async def update_organization_modules(
+async def remove_user_from_organization(
     org_id: str,
-    request: OrganizationModulesUpdateRequest,
+    user_id: str,
     admin_service: AdminServiceDep,
-) -> OrganizationModulesUpdateResponse:
-    """Organizasyon modüllerini güncelle."""
-    return await admin_service.update_organization_modules(
-        org_id=uuid.UUID(org_id),
-        modules=[m.model_dump() for m in request.modules],
+):
+    """
+    Kullanıcıyı organizasyondan çıkar (Soft Delete).
+    
+    - Kullanıcı is_active=False yapılır
+    - Organizasyon üyeliği kaldırılır
+    - Auth0'dan engellenmez (sadece bu org'dan çıkar)
+    """
+    try:
+        org_uuid = uuid.UUID(org_id)
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Geçersiz ID formatı",
+        )
+    
+    result = await admin_service.remove_user_from_organization(
+        organization_id=org_uuid,
+        user_id=user_uuid,
     )
+    return result

@@ -57,10 +57,8 @@ class ZoneType(str, Enum):
 
 class AssetMembershipRelation(str, Enum):
     """Relation types for asset membership."""
-    OWNER = "owner"
     TENANT = "tenant"
     AGENT = "agent"
-    OPERATOR_VIEW = "operator_view"
 
 
 class TenancyStatus(str, Enum):
@@ -74,7 +72,7 @@ class HandoverMode(str, Enum):
     """How the handover was initiated."""
     QR = "qr"
     ADMIN = "admin"
-    OWNER_INITIATED = "owner_initiated"
+    TENANT_INITIATED = "tenant_initiated"
 
 
 class AssetStatus(str, Enum):
@@ -406,7 +404,7 @@ class AssetMembership(Base):
     relation: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
-        comment="owner/tenant/agent/operator_view",
+        comment="tenant/agent",
     )
     
     scopes: Mapped[list[str]] = mapped_column(
@@ -481,7 +479,7 @@ class Tenancy(Base):
     handover_mode: Mapped[str | None] = mapped_column(
         String(30),
         nullable=True,
-        comment="How the tenancy was initiated: qr/admin/owner_initiated",
+        comment="How the tenancy was initiated: qr/admin/tenant_initiated",
     )
     
     # Relationships
@@ -500,7 +498,7 @@ class HandoverToken(Base):
     """
     Digital handover tokens for tenant transitions.
     
-    When a tenant moves out, owner generates a handover token.
+    When a tenant moves out, admin generates a handover token.
     New tenant scans QR/enters token to claim the asset.
     """
     __tablename__ = "handover_token"

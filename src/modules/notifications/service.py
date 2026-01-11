@@ -24,6 +24,7 @@ Kullanım:
         org_name="Awaxen",
     )
 """
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -589,8 +590,8 @@ class NotificationService:
             logger.warning("Resend API key not configured, skipping email")
             return False
         
-        # Frontend davet linki
-        invite_link = f"https://app.awaxen.com/join?token={token}"
+        # Frontend davet linki  TODO:"https://app.awaxen.com/join"
+        invite_link = f"http://localhost:3005/join?token={token}"
         
         # Davet eden bilgisi
         inviter_text = f" ({invited_by_name} tarafından)" if invited_by_name else ""
@@ -636,17 +637,30 @@ class NotificationService:
         """
         
         try:
-            result = resend.Emails.send({
-                "from": settings.email_sender,
-                "to": email,
-                "subject": f"🏠 {org_name} sizi Awaxen'e davet ediyor",
-                "html": html_content,
-            })
+            # Sender email - domain doğrulanmamışsa resend.dev kullan
+            sender_email = settings.email_sender
+            if not sender_email or sender_email == "onboarding@resend.dev":
+                sender_email = "Awaxen <onboarding@resend.dev>"
+            else:
+                # Custom domain için format: "Awaxen <email@domain.com>"
+                sender_email = f"Awaxen <{sender_email}>"
+            
+            # Resend sync API'yi async context'te çalıştır
+            result = await asyncio.to_thread(
+                resend.Emails.send,
+                {
+                    "from": sender_email,
+                    "to": email,
+                    "subject": f"🏠 {org_name} sizi Awaxen'e davet ediyor",
+                    "html": html_content,
+                }
+            )
             
             logger.info(
                 "Invitation email sent",
                 email=email,
                 org_name=org_name,
+                sender=sender_email,
                 resend_id=result.get("id") if isinstance(result, dict) else str(result),
             )
             return True
@@ -699,12 +713,16 @@ class NotificationService:
         """
         
         try:
-            result = resend.Emails.send({
-                "from": settings.email_sender,
-                "to": email,
-                "subject": "🎉 Awaxen'e Hoşgeldiniz!",
-                "html": html_content,
-            })
+            # Resend sync API'yi async context'te çalıştır
+            result = await asyncio.to_thread(
+                resend.Emails.send,
+                {
+                    "from": settings.email_sender,
+                    "to": email,
+                    "subject": "🎉 Awaxen'e Hoşgeldiniz!",
+                    "html": html_content,
+                }
+            )
             
             logger.info("Welcome email sent", email=email)
             return True

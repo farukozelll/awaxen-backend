@@ -122,7 +122,7 @@ class Wallet(Base):
         comment="company=Organizasyon, personal=Kullanıcı",
     )
     
-    # Owner: Organization (COMPANY wallet için)
+    # Organization (COMPANY wallet için)
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organization.id", ondelete="CASCADE"),
@@ -130,7 +130,7 @@ class Wallet(Base):
         index=True,
     )
     
-    # Owner: User (PERSONAL wallet için)
+    # User (PERSONAL wallet için)
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("user.id", ondelete="CASCADE"),
@@ -203,13 +203,13 @@ class Wallet(Base):
         return self.balance
     
     @property
-    def owner_id(self) -> uuid.UUID:
-        """Get owner ID (organization or user)."""
+    def holder_id(self) -> uuid.UUID:
+        """Get holder ID (organization or user)."""
         return self.organization_id if self.wallet_type == WalletType.COMPANY else self.user_id
     
     @property
-    def owner_type(self) -> str:
-        """Get owner type string."""
+    def holder_type(self) -> str:
+        """Get holder type string."""
         return "organization" if self.wallet_type == WalletType.COMPANY else "user"
 
 

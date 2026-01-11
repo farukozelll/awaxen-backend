@@ -788,6 +788,69 @@ class AdminService:
             role=request.role_code,
         )
     
+    async def remove_user_from_organization(
+        self,
+        organization_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> dict:
+        """
+        Kullanıcıyı organizasyondan çıkar (Soft Delete).
+        
+        - OrganizationUser kaydını siler
+        - Kullanıcının başka organizasyonu yoksa is_active=False yapar
+        """
+        # Kullanıcıyı bul
+        user = await self._get_user_by_id(user_id)
+        if not user:
+            raise NotFoundError("User", user_id)
+        
+        # Organizasyonu bul
+        org = await self.get_organization_by_id(organization_id)
+        if not org:
+            raise NotFoundError("Organization", organization_id)
+        
+        # Üyeliği bul
+        membership = None
+        for m in user.organization_memberships:
+            if m.organization_id == organization_id:
+                membership = m
+                break
+        
+        if not membership:
+            raise NotFoundError("User is not a member of this organization")
+        
+        # Üyeliği sil
+        await self.db.delete(membership)
+        
+        # Kullanıcının başka organizasyonu var mı kontrol et
+        remaining_memberships = [
+            m for m in user.organization_memberships 
+            if m.organization_id != organization_id
+        ]
+        
+        if not remaining_memberships:
+            # Başka organizasyonu yok, kullanıcıyı pasife çek
+            user.is_active = False
+            user.deleted_at = datetime.now(timezone.utc)
+        
+        await self.db.commit()
+        
+        logger.info(
+            "User removed from organization",
+            user_id=str(user_id),
+            user_email=user.email,
+            organization_id=str(organization_id),
+            organization_name=org.name,
+            user_deactivated=not remaining_memberships,
+        )
+        
+        return {
+            "message": f"Kullanıcı '{user.email}' organizasyondan çıkarıldı",
+            "user_id": str(user_id),
+            "organization_id": str(organization_id),
+            "user_deactivated": not remaining_memberships,
+        }
+    
     async def assign_role_to_user(self, user_id: str, request) -> AssignRoleToUserResponse:
         """Kullanıcıya rol ata."""
         user = await self._get_user_by_id(uuid.UUID(user_id))
@@ -972,21 +1035,32 @@ class AdminService:
         if not org:
             raise NotFoundError("Organization", organization_id)
         
+        # Admin/Superuser kontrolü - herhangi bir organizasyona davet gönderebilir
+        is_admin = invited_by.is_superuser
+        user_roles: set[str] = set()
+        for m in invited_by.organization_memberships:
+            if m.role:
+                user_roles.add(m.role.code)
+        if "admin" in user_roles:
+            is_admin = True
+        
         # Davet eden kişi organizasyonun üyesi mi?
         is_member = False
-        is_owner = False
+        is_tenant = False
         for membership in invited_by.organization_memberships:
             if membership.organization_id == organization_id:
                 is_member = True
-                is_owner = membership.is_owner
+                if membership.role and membership.role.code == "tenant":
+                    is_tenant = True
                 break
         
-        if not is_member:
+        # Admin değilse ve üye değilse hata ver
+        if not is_admin and not is_member:
             raise ForbiddenError("Bu organizasyona davet gönderme yetkiniz yok")
         
-        # Rol kontrolü - tenant sadece user/device atayabilir
+        # Rol kontrolü - Admin her rolü atayabilir, tenant sadece user/device atayabilir
         if role_code not in ["user", "device"]:
-            if not is_owner:
+            if not is_admin and not is_tenant:
                 raise ForbiddenError("Sadece 'user' veya 'device' rolü atayabilirsiniz")
         
         # Aynı email için aktif davetiye var mı?
@@ -1011,6 +1085,27 @@ class AdminService:
         self.db.add(invitation)
         await self.db.commit()
         await self.db.refresh(invitation)
+        
+        # Relationship'leri manuel olarak ata (lazy loading async'te çalışmaz)
+        invitation.organization = org
+        invitation.invited_by = invited_by
+        
+        # Email gönder (Resend)
+        try:
+            from src.modules.notifications.service import NotificationService
+            notification_service = NotificationService(self.db)
+            await notification_service.send_invitation_email(
+                email=email,
+                token=token,
+                org_name=org.name,
+                invited_by_name=invited_by.full_name,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to send invitation email, but invitation created",
+                error=str(e),
+                email=email,
+            )
         
         logger.info(
             "Invitation created",
@@ -1277,30 +1372,29 @@ class AdminService:
             raise ConflictError("Yeni sahip bu organizasyonun üyesi değil")
         
         # Rolleri al
-        tenant_role = await self._get_or_create_role(RoleType.TENANT.value)
-        user_role = await self._get_or_create_role(RoleType.USER.value)
+        tenant_role = await self._get_or_create_role("tenant")
+        user_role = await self._get_or_create_role("user")
         
-        # Mevcut sahipleri bul ve user rolüne düşür
+        # Mevcut tenant'ları bul ve demote et
         stmt = (
             select(OrganizationUser)
             .options(selectinload(OrganizationUser.user))
             .where(
                 OrganizationUser.organization_id == org_id,
-                OrganizationUser.is_owner == True,
+                OrganizationUser.role_id == tenant_role.id,
             )
         )
         result = await self.db.execute(stmt)
-        current_owners = result.scalars().all()
+        current_tenants = result.scalars().all()
         
-        current_owner_email = None
-        for owner in current_owners:
-            owner.is_owner = False
-            owner.role_id = user_role.id
-            if owner.user:
-                current_owner_email = owner.user.email
+        current_tenant_email = None
+        for tenant in current_tenants:
+            tenant.role_id = user_role.id
+            tenant.is_default = False
+            if tenant.user:
+                current_tenant_email = tenant.user.email
         
         # Yeni sahibe tenant rolü ver
-        new_owner_membership.is_owner = True
         new_owner_membership.role_id = tenant_role.id
         new_owner_membership.is_default = True
         
@@ -1310,7 +1404,7 @@ class AdminService:
             "Organization ownership transferred",
             org_id=str(org_id),
             org_name=org.name,
-            old_owner_email=current_owner_email,
+            old_owner_email=current_tenant_email,
             new_owner_email=new_owner.email,
         )
         
@@ -1318,7 +1412,7 @@ class AdminService:
             "status": "transferred",
             "organization_id": str(org_id),
             "organization_name": org.name,
-            "old_owner_email": current_owner_email,
+            "old_owner_email": current_tenant_email,
             "new_owner_id": str(new_owner_user_id),
             "new_owner_email": new_owner.email,
             "message": f"Organizasyon sahipliği '{new_owner.email}' kullanıcısına devredildi",

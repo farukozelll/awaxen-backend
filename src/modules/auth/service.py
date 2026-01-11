@@ -170,10 +170,10 @@ class AuthService:
         self.db.add(org)
         await self.db.flush()
         
-        # Get or create tenant role (organization owner)
+        # Get or create tenant role (organization manager)
         tenant_role = await self._get_or_create_tenant_role()
         
-        # Add user as org tenant (owner)
+        # Add user as org tenant (manager)
         membership = OrganizationUser(
             user_id=user.id,
             organization_id=org.id,
@@ -227,7 +227,7 @@ class AuthService:
         return role
     
     async def _get_or_create_tenant_role(self) -> Role:
-        """Get or create the tenant role for new organization owners."""
+        """Get or create the tenant role for new organization managers."""
         return await self._get_or_create_role(RoleType.TENANT.value)
     
     # ============== User Operations ==============
@@ -305,21 +305,27 @@ class AuthService:
     async def create_organization(
         self,
         data: OrganizationCreate,
-        owner_id: uuid.UUID,
+        user_id: uuid.UUID,
     ) -> Organization:
         """Create a new organization."""
         existing = await self.get_organization_by_slug(data.slug)
         if existing:
-            raise ConflictError(f"Organization with slug {data.slug} already exists")
+            raise ConflictError("Organization with this slug already exists")
         
-        org = Organization(**data.model_dump())
+        org = Organization(
+            name=data.name,
+            slug=data.slug,
+            description=data.description,
+            organization_type=data.organization_type,
+            is_active=True,
+        )
         self.db.add(org)
         await self.db.flush()
         
-        # Add owner as tenant
+        # Add user as tenant
         tenant_role = await self._get_or_create_tenant_role()
         membership = OrganizationUser(
-            user_id=owner_id,
+            user_id=user_id,
             organization_id=org.id,
             role_id=tenant_role.id,
             is_default=True,
@@ -329,6 +335,7 @@ class AuthService:
         
         await self.db.commit()
         await self.db.refresh(org)
+        
         return org
     
     async def update_organization(
@@ -635,7 +642,8 @@ class AuthService:
                 user_id=user.id,
                 organization_id=organization_id,
                 role_id=role.id,
-                is_owner=False,
+                is_default=True,
+                joined_at=datetime.now(timezone.utc),
             )
             self.db.add(org_user)
     
