@@ -9,11 +9,11 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.modules.admin.services.organization_service import AdminOrganizationService
-from src.modules.admin.services.user_service import AdminUserService
 from src.modules.admin.services.invitation_service import AdminInvitationService
-from src.modules.admin.services.system_service import AdminSystemService
+from src.modules.admin.services.organization_service import AdminOrganizationService
 from src.modules.admin.services.rewards_service import AdminRewardsService
+from src.modules.admin.services.system_service import AdminSystemService
+from src.modules.admin.services.user_service import AdminUserService
 
 
 async def get_admin_organization_service(

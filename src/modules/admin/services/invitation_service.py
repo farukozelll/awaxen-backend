@@ -7,16 +7,17 @@ Davetiye yönetimi işlemleri.
 - Revoke invitations
 - Email notifications
 """
-import uuid
 import secrets
-from datetime import datetime, timedelta, timezone
+import uuid
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.core.exceptions import ConflictError, NotFoundError, ForbiddenError
+from src.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from src.core.logging import get_logger
 from src.modules.auth.models import (
     Invitation,
     Organization,
@@ -24,7 +25,6 @@ from src.modules.auth.models import (
     User,
 )
 from src.modules.auth.schemas import InvitationResponse
-from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     pass
@@ -81,8 +81,6 @@ class AdminInvitationService:
         if not membership:
             raise ForbiddenError("Bu organizasyona davet gönderme yetkiniz yok")
         
-        is_tenant = membership.role and membership.role.code == "tenant"
-        
         # Rol kontrolü - tenant sadece user/device atayabilir
         allowed_roles = ["user", "device"]
         if role_code not in allowed_roles:
@@ -107,7 +105,7 @@ class AdminInvitationService:
             role_code=role_code,
             invited_by_id=invited_by.id,
             message=message,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_hours),
+            expires_at=datetime.now(datetime.UTC) + timedelta(hours=expires_hours),
             is_used=False,
         )
         
@@ -163,7 +161,7 @@ class AdminInvitationService:
         stmt = select(Invitation).where(Invitation.organization_id == organization_id)
         
         if not include_used:
-            stmt = stmt.where(Invitation.is_used == False)
+            stmt = stmt.where(not Invitation.is_used)
         
         stmt = stmt.order_by(Invitation.created_at.desc())
         
@@ -219,8 +217,8 @@ class AdminInvitationService:
             count_stmt = count_stmt.where(Invitation.email.ilike(f"%{search}%"))
         
         if not include_used:
-            stmt = stmt.where(Invitation.is_used == False)
-            count_stmt = count_stmt.where(Invitation.is_used == False)
+            stmt = stmt.where(not Invitation.is_used)
+            count_stmt = count_stmt.where(not Invitation.is_used)
         
         # Total count
         total_result = await self.db.execute(count_stmt)
@@ -265,7 +263,7 @@ class AdminInvitationService:
         total_invitations = total_result.scalar() or 0
         
         # Kullanılmış davetiyeler
-        used_stmt = select(func.count(Invitation.id)).where(Invitation.is_used == True)
+        used_stmt = select(func.count(Invitation.id)).where(Invitation.is_used)
         used_result = await self.db.execute(used_stmt)
         used_invitations = used_result.scalar() or 0
         
@@ -273,7 +271,7 @@ class AdminInvitationService:
         pending_invitations = total_invitations - used_invitations
         
         # Son 7 günde oluşturulanlar
-        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        seven_days_ago = datetime.now(datetime.UTC) - timedelta(days=7)
         recent_stmt = select(func.count(Invitation.id)).where(
             Invitation.created_at >= seven_days_ago
         )
@@ -282,8 +280,8 @@ class AdminInvitationService:
         
         # Süresi geçmiş davetiyeler
         expired_stmt = select(func.count(Invitation.id)).where(
-            Invitation.expires_at < datetime.now(timezone.utc),
-            Invitation.is_used == False
+            Invitation.expires_at < datetime.now(datetime.UTC),
+            not Invitation.is_used
         )
         expired_result = await self.db.execute(expired_stmt)
         expired_invitations = expired_result.scalar() or 0
@@ -313,8 +311,8 @@ class AdminInvitationService:
             select(Invitation)
             .where(
                 Invitation.email == email,
-                Invitation.is_used == False,
-                Invitation.expires_at > datetime.now(timezone.utc)
+                not Invitation.is_used,
+                Invitation.expires_at > datetime.now(datetime.UTC)
             )
             .order_by(Invitation.created_at.desc())
         )
