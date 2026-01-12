@@ -14,7 +14,7 @@ Error Response Format (RFC 7807 inspired):
 }
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -30,7 +30,7 @@ def _get_request_id(request: Request) -> str:
     return request.headers.get("X-Request-ID", str(uuid.uuid4()))
 
 
-class AwaxenException(Exception):
+class AwaxenError(Exception):
     """Base exception for Awaxen application."""
     
     def __init__(
@@ -47,7 +47,7 @@ class AwaxenException(Exception):
         super().__init__(self.message)
 
 
-class NotFoundError(AwaxenException):
+class NotFoundError(AwaxenError):
     """Resource not found."""
     
     def __init__(self, resource: str, identifier: Any):
@@ -59,7 +59,7 @@ class NotFoundError(AwaxenException):
         )
 
 
-class UnauthorizedError(AwaxenException):
+class UnauthorizedError(AwaxenError):
     """Authentication required."""
     
     def __init__(self, message: str = "Authentication required"):
@@ -70,7 +70,7 @@ class UnauthorizedError(AwaxenException):
         )
 
 
-class ForbiddenError(AwaxenException):
+class ForbiddenError(AwaxenError):
     """Permission denied."""
     
     def __init__(self, message: str = "Permission denied"):
@@ -81,7 +81,7 @@ class ForbiddenError(AwaxenException):
         )
 
 
-class ConflictError(AwaxenException):
+class ConflictError(AwaxenError):
     """Resource conflict."""
     
     def __init__(self, message: str = "Resource conflict"):
@@ -92,7 +92,7 @@ class ConflictError(AwaxenException):
         )
 
 
-class ValidationError(AwaxenException):
+class ValidationError(AwaxenError):
     """Validation error."""
     
     def __init__(self, message: str, details: dict[str, Any] | None = None):
@@ -104,7 +104,7 @@ class ValidationError(AwaxenException):
         )
 
 
-class TenantContextError(AwaxenException):
+class TenantContextError(AwaxenError):
     """Tenant context not available."""
     
     def __init__(self):
@@ -115,7 +115,7 @@ class TenantContextError(AwaxenException):
         )
 
 
-class RateLimitError(AwaxenException):
+class RateLimitError(AwaxenError):
     """Rate limit exceeded."""
     
     def __init__(self, retry_after: int = 60):
@@ -127,7 +127,7 @@ class RateLimitError(AwaxenException):
         )
 
 
-class ServiceUnavailableError(AwaxenException):
+class ServiceUnavailableError(AwaxenError):
     """External service unavailable."""
     
     def __init__(self, service: str, message: str = "Service temporarily unavailable"):
@@ -139,7 +139,7 @@ class ServiceUnavailableError(AwaxenException):
         )
 
 
-class GatewayTimeoutError(AwaxenException):
+class GatewayTimeoutError(AwaxenError):
     """Gateway/device timeout."""
     
     def __init__(self, gateway_id: str | None = None):
@@ -160,7 +160,7 @@ def _build_error_response(
 ) -> ORJSONResponse:
     """Build standardized error response."""
     request_id = _get_request_id(request)
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(datetime.UTC).isoformat()
     
     return ORJSONResponse(
         status_code=status_code,
@@ -179,8 +179,8 @@ def _build_error_response(
     )
 
 
-async def awaxen_exception_handler(request: Request, exc: AwaxenException) -> ORJSONResponse:
-    """Handler for AwaxenException."""
+async def awaxen_exception_handler(request: Request, exc: AwaxenError) -> ORJSONResponse:
+    """Handler for AwaxenError."""
     request_id = _get_request_id(request)
     
     # Log the error

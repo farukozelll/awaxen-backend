@@ -4,7 +4,7 @@ All models inherit from this base class.
 Automatically adds id (UUID), created_at, updated_at to all models.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import DateTime, MetaData, text
@@ -25,7 +25,7 @@ metadata = MetaData(naming_convention=convention)
 
 def utc_now() -> datetime:
     """Return current UTC datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(datetime.UTC)
 
 
 class Base(DeclarativeBase):
@@ -41,9 +41,9 @@ class Base(DeclarativeBase):
     metadata = metadata
     
     @declared_attr.directive
-    def __tablename__(cls) -> str:
+    def __tablename__(self) -> str:
         """Generate table name from class name (snake_case)."""
-        name = cls.__name__
+        name = self.__name__
         # Convert CamelCase to snake_case
         result = [name[0].lower()]
         for char in name[1:]:
@@ -91,7 +91,7 @@ class TenantMixin:
     """
     
     @declared_attr
-    def organization_id(cls) -> Mapped[uuid.UUID]:
+    def organization_id(self) -> Mapped[uuid.UUID]:
         from sqlalchemy import ForeignKey
         return mapped_column(
             UUID(as_uuid=True),

@@ -2,7 +2,7 @@
 Security Module
 JWT token management and password hashing.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from jose import JWTError, jwt
@@ -41,16 +41,16 @@ def create_access_token(
         Encoded JWT token string
     """
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(datetime.UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
+        expire = datetime.now(datetime.UTC) + timedelta(
             minutes=settings.access_token_expire_minutes
         )
     
     to_encode: dict[str, Any] = {
         "exp": expire,
         "sub": str(subject),
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(datetime.UTC),
     }
     
     if extra_claims:

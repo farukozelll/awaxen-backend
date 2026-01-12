@@ -28,12 +28,12 @@ def configure_logging() -> None:
     
     if settings.environment == "development":
         # Development: Pretty console output
-        processors: list[Processor] = shared_processors + [
+        processors: list[Processor] = [*shared_processors,
             structlog.dev.ConsoleRenderer(colors=True),
         ]
     else:
         # Production: JSON output
-        processors = shared_processors + [
+        processors = [*shared_processors,
             structlog.processors.format_exc_info,
             structlog.processors.JSONRenderer(),
         ]
