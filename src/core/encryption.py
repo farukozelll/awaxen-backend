@@ -31,8 +31,11 @@ class EncryptionService:
                 self._fernet = Fernet(self._key.encode())
             except Exception as e:
                 logger.error("Invalid encryption key", error=str(e))
-                raise ValueError("Invalid ENCRYPTION_KEY. Generate with: "
-                               "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"") from e
+                raise ValueError(
+                    "Invalid ENCRYPTION_KEY. Generate with: "
+                    "python -c \"from cryptography.fernet import Fernet; "
+                    "print(Fernet.generate_key().decode())\""
+                ) from e
     
     @property
     def is_configured(self) -> bool:

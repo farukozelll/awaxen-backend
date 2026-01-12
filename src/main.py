@@ -2,10 +2,10 @@
 Awaxen Backend - Main Application Entry Point
 Application Factory Pattern with ORJSONResponse for maximum performance.
 """
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import ORJSONResponse
@@ -50,9 +50,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await close_db()
 
 
-# OpenAPI Tags Metadata - Best Practice Gruplandırma
+# OpenAPI Tags Metadata - Best Practice Gruplandirma
 TAGS_METADATA = [
-  {"name": "health", "description": "❤️ **Sağlık** - Sistem durumu ve metrikler"},
+  {"name": "health", "description": "❤️ **Saglik** - Sistem durumu ve metrikler"},
 ]
 
 # API Description for Swagger
@@ -63,7 +63,7 @@ API_DESCRIPTION = """
 
 ---
 
-## 🚀 Hızlı Başlangıç
+## 🚀 Hizli Baslangic
 
 ### 1. Auth0 Token Al
 ```bash
@@ -339,24 +339,26 @@ def _include_routers(app: FastAPI) -> None:
     L7 Best Practice: Auth modülü sadece kimlik doğrulama yapar.
     Admin işlemleri ayrı Admin modülünde.
     """
+    from src.core.metrics import router as metrics_router
+    from src.modules.admin import router as admin_router  # Clean Code admin router
     from src.modules.auth.router import router as auth_router
     from src.modules.auth.router import users_router
     from src.modules.auth.tenant_router import tenant_router  # Tenant Management
-    from src.modules.admin import router as admin_router  # Clean Code admin router
-    from src.modules.iot.router import router as iot_router
-    from src.modules.real_estate.router import router as real_estate_router
-    from src.modules.integrations.router import router as integrations_router
-    from src.modules.dashboard.router import router as dashboard_router
-    from src.modules.notifications.router import router as notifications_router
-    from src.modules.compliance.router import router as compliance_router
     from src.modules.compliance.router import audit_router
+    from src.modules.compliance.router import router as compliance_router
+    from src.modules.dashboard.router import router as dashboard_router
+    from src.modules.energy.router import (
+        core_loop_router,
+        epias_router,
+        rewards_router,
+        wallet_router,
+    )
     from src.modules.energy.router import router as energy_router
-    from src.modules.energy.router import rewards_router
-    from src.modules.energy.router import epias_router
-    from src.modules.energy.router import wallet_router
-    from src.modules.energy.router import core_loop_router
+    from src.modules.integrations.router import router as integrations_router
+    from src.modules.iot.router import router as iot_router
+    from src.modules.notifications.router import router as notifications_router
+    from src.modules.real_estate.router import router as real_estate_router
     from src.modules.sse.router import router as sse_router
-    from src.core.metrics import router as metrics_router
     
     api_v1_prefix = settings.api_v1_str  # /api/v1
     

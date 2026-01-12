@@ -96,6 +96,10 @@ ignore = [
     "S106",  # Hardcoded password in function argument (token types, not passwords)
     "S107",  # Hardcoded password in default value (token types, not passwords)
     "B008",  # Depends() in function defaults (FastAPI dependency injection pattern)
+    "RUF001", # Turkish characters (ı, ş, ğ, ç, ö, ü) in strings
+    "RUF002", # Turkish characters (ı, ş, ğ, ç, ö, ü) in docstrings
+    "RUF003", # Turkish characters (ı, ş, ğ, ç, ö, ü) in comments
+    "S104",  # Binding to all interfaces (0.0.0.0) - Docker development
 ]
 
 [tool.ruff.lint.per-file-ignores]

@@ -7,10 +7,10 @@ Sentry captures:
 - Performance traces
 """
 import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
-from sentry_sdk.integrations.redis import RedisIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.redis import RedisIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 from src.core.config import settings
 from src.core.logging import get_logger
@@ -70,11 +70,10 @@ def _before_send(event, hint):
     if "exception" in event:
         exc_info = hint.get("exc_info")
         if exc_info:
-            exc_type, exc_value, _ = exc_info
+            _, exc_value, _ = exc_info
             # Skip client errors
-            if hasattr(exc_value, "status_code"):
-                if 400 <= exc_value.status_code < 500:
-                    return None
+            if hasattr(exc_value, "status_code") and 400 <= exc_value.status_code < 500:
+                return None
     
     # Remove sensitive headers
     if "request" in event and "headers" in event["request"]:
