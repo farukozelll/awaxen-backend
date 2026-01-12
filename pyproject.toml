@@ -101,6 +101,7 @@ ignore = [
     "RUF003", # Turkish characters (ı, ş, ğ, ç, ö, ü) in comments
     "S104",  # Binding to all interfaces (0.0.0.0) - Docker development
     "B904",  # Exception handling without from err (FastAPI pattern)
+    "E501",  # Line too long - Admin service has many delegation methods
 ]
 
 [tool.ruff.lint.per-file-ignores]

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import NotFoundError
+from src.core.logging import get_logger
 from src.modules.auth.schemas import (
     CreateOrganizationWithUserRequest,
     CreateOrganizationWithUserResponse,
@@ -23,10 +23,9 @@ from src.modules.auth.schemas import (
     RoleResponse,
     UserResponse,
 )
-from src.core.logging import get_logger
 
 if TYPE_CHECKING:
-    from fastapi import BackgroundTasks
+    pass
 
 logger = get_logger(__name__)
 
@@ -104,16 +103,14 @@ class AdminService:
         Diğer organizasyon metodları organization_service'e deleg edilir.
         """
         import secrets
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
         
         from src.modules.auth.models import (
             Invitation,
             Organization,
             OrganizationUser,
-            Role,
             User,
         )
-        from sqlalchemy import select
         
         # Slug oluştur
         slug = request.organization_slug
@@ -136,7 +133,8 @@ class AdminService:
             name=request.organization_name,
             slug=slug,
             description=request.organization_description,
-            organization_type=request.organization_type.value if request.organization_type else None,
+            organization_type=request.organization_type.value
+            if request.organization_type else None,
             company_size=request.company_size,
             email=request.organization_email,
             phone=request.organization_phone,
@@ -176,7 +174,7 @@ class AdminService:
             organization_id=org.id,
             role_id=role.id,
             is_default=True,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(datetime.UTC),
         )
         self.db.add(membership)
         
@@ -189,7 +187,7 @@ class AdminService:
             role_code="tenant",
             invited_by_id=None,  # Sistem tarafından oluşturuldu
             message="Organizasyonunuz oluşturuldu. Hesabınızı aktifleştirin.",
-            expires_at=datetime.now(timezone.utc) + timedelta(days=7),  # 7 gün süre
+            expires_at=datetime.now(datetime.UTC) + timedelta(days=7),  # 7 gün süre
             is_used=False
         )
         self.db.add(invitation)
@@ -227,7 +225,8 @@ class AdminService:
         )
         
         return CreateOrganizationWithUserResponse(
-            message="Organizasyon ve kullanıcı başarıyla oluşturuldu. Davet e-postası gönderiliyor.",
+            message="Organizasyon ve kullanıcı başarıyla oluşturuldu. "
+            "Davet e-postası gönderiliyor.",
             organization=OrganizationResponse.model_validate(org),
             user=UserResponse.model_validate(user),
             role=RoleResponse.model_validate(role),
@@ -270,7 +269,7 @@ class AdminService:
                 email=email,
                 org_name=org_name,
             )
-            return f"Email gönderilemedi: {str(e)}"
+            return f"Email gönderilemedi: {e!s}"
     
     async def create_organization_step2(self, request):
         """Delegate to organization service."""
