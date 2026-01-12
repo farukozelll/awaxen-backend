@@ -56,7 +56,7 @@ async def get_jwks() -> dict[str, Any]:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to fetch authentication keys",
-            )
+            ) from e
 
 
 def get_rsa_key(token: str, jwks: dict[str, Any]) -> dict[str, Any] | None:
@@ -164,20 +164,20 @@ async def verify_token(token: str) -> Auth0User:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from None
     except jwt.JWTClaimsError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token claims",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from None
     except JWTError as e:
         logger.error("JWT verification failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
 
 async def get_current_user_auth0(
@@ -349,7 +349,7 @@ class Auth0ManagementClient:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to authenticate with Auth0 Management API",
-            )
+            ) from e
     
     async def revoke_user_sessions(self, auth0_user_id: str) -> dict[str, Any]:
         """

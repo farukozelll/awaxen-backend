@@ -32,7 +32,7 @@ class EncryptionService:
             except Exception as e:
                 logger.error("Invalid encryption key", error=str(e))
                 raise ValueError("Invalid ENCRYPTION_KEY. Generate with: "
-                               "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"")
+                               "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"") from e
     
     @property
     def is_configured(self) -> bool:
@@ -73,7 +73,7 @@ class EncryptionService:
             return decrypted.decode()
         except InvalidToken:
             logger.error("Failed to decrypt data - invalid token or key")
-            raise ValueError("Decryption failed. Data may be corrupted or key is wrong.")
+            raise ValueError("Decryption failed. Data may be corrupted or key is wrong.") from None
     
     def encrypt_dict(self, data: dict, fields: list[str]) -> dict:
         """
@@ -88,7 +88,7 @@ class EncryptionService:
         """
         result = data.copy()
         for field in fields:
-            if field in result and result[field]:
+            if result.get(field):
                 result[field] = self.encrypt(str(result[field]))
         return result
     
@@ -105,7 +105,7 @@ class EncryptionService:
         """
         result = data.copy()
         for field in fields:
-            if field in result and result[field]:
+            if result.get(field):
                 try:
                     result[field] = self.decrypt(str(result[field]))
                 except ValueError:
