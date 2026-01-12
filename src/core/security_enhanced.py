@@ -6,8 +6,8 @@ Hybrid Authentication System:
 - Impersonation tokens with proper validation
 - Token type detection and validation
 """
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from datetime import datetime, timedelta
+from typing import Any
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -34,8 +34,8 @@ def get_password_hash(password: str) -> str:
 def create_access_token(
     subject: str | int,
     expires_delta: timedelta | None = None,
-    extra_claims: Dict[str, Any] | None = None,
-    token_type: str = "local",
+    extra_claims: dict[str, Any] | None = None,
+    token_type: str = "access",  # Token type for validation
 ) -> str:
     """
     Create a JWT access token with type support.
@@ -50,16 +50,16 @@ def create_access_token(
         Encoded JWT token string
     """
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(datetime.UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
+        expire = datetime.now(datetime.UTC) + timedelta(
             minutes=settings.access_token_expire_minutes
         )
     
-    to_encode: Dict[str, Any] = {
+    to_encode: dict[str, Any] = {
         "exp": expire,
         "sub": str(subject),
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(datetime.UTC),
         "token_type": token_type,  # Critical: Token type identification
     }
     
@@ -77,8 +77,8 @@ def create_impersonation_token(
     target_user_id: str,
     admin_user_id: str,
     duration_minutes: int = 60,
-    org_id: Optional[str] = None,
-    reason: Optional[str] = None,
+    org_id: str | None = None,
+    reason: str | None = None,
 ) -> str:
     """
     Create a secure impersonation token with proper claims.
@@ -93,7 +93,7 @@ def create_impersonation_token(
     Returns:
         Encoded JWT impersonation token
     """
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
+    expires_at = datetime.now(datetime.UTC) + timedelta(minutes=duration_minutes)
     
     extra_claims = {
         "token_type": "impersonation",
@@ -119,11 +119,11 @@ def create_impersonation_token(
         subject=target_user_id,
         expires_delta=timedelta(minutes=duration_minutes),
         extra_claims=extra_claims,
-        token_type="impersonation"
+        token_type="impersonation"  # Token type for impersonation
     )
 
 
-def verify_token(token: str) -> Dict[str, Any] | None:
+def verify_token(token: str) -> dict[str, Any] | None:
     """
     Verify and decode a JWT token with type support.
     
@@ -145,7 +145,7 @@ def verify_token(token: str) -> Dict[str, Any] | None:
         return None
 
 
-def verify_token_with_type(token: str, expected_type: str | None = None) -> Dict[str, Any] | None:
+def verify_token_with_type(token: str, expected_type: str | None = None) -> dict[str, Any] | None:
     """
     Verify token with optional type checking.
     
@@ -173,7 +173,7 @@ def verify_token_with_type(token: str, expected_type: str | None = None) -> Dict
     return payload
 
 
-def is_impersonation_token(payload: Dict[str, Any]) -> bool:
+def is_impersonation_token(payload: dict[str, Any]) -> bool:
     """
     Check if token is an impersonation token.
     
@@ -186,7 +186,7 @@ def is_impersonation_token(payload: Dict[str, Any]) -> bool:
     return payload.get("token_type") == "impersonation" and payload.get("is_impersonated") is True
 
 
-def validate_impersonation_token(payload: Dict[str, Any]) -> bool:
+def validate_impersonation_token(payload: dict[str, Any]) -> bool:
     """
     Validate impersonation token for security.
     
@@ -204,7 +204,7 @@ def validate_impersonation_token(payload: Dict[str, Any]) -> bool:
     if expires_at_str:
         try:
             expires_at = datetime.fromisoformat(expires_at_str)
-            if datetime.now(timezone.utc) > expires_at:
+            if datetime.now(datetime.UTC) > expires_at:
                 logger.warning("Impersonation token expired")
                 return False
         except ValueError:
@@ -214,7 +214,7 @@ def validate_impersonation_token(payload: Dict[str, Any]) -> bool:
     return True
 
 
-def get_token_info(payload: Dict[str, Any]) -> Dict[str, Any]:
+def get_token_info(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Extract token information for logging and debugging.
     
