@@ -1,6 +1,6 @@
 services:
   # ============================================
-  # NGINX REVERSE PROXY (Cloudflare Ready)
+  # NGINX REVERSE PROXY
   # ============================================
   nginx:
     image: nginx:alpine
@@ -32,13 +32,12 @@ services:
     pull_policy: always
     container_name: awaxen_backend
     command: >
-      gunicorn src.main:app
+      uvicorn src.main:app
+      --host 0.0.0.0
+      --port 8000
       --workers 4
-      --worker-class uvicorn.workers.UvicornWorker
-      --bind 0.0.0.0:8000
-      --access-logfile -
-      --error-logfile -
-      --timeout 120
+      --access-log -
+      --error-log -
     env_file:
       - .env
     environment:
@@ -125,6 +124,11 @@ services:
     volumes:
       - .:/app
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - awaxen_network
 
@@ -170,6 +174,11 @@ services:
       - worker
       - redis
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - awaxen_network
 
@@ -177,7 +186,7 @@ services:
   # POSTGRESQL + TIMESCALEDB
   # ============================================
   db:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:latest-pg15
     container_name: awaxen_db
     restart: unless-stopped
     environment:
@@ -187,7 +196,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - db_data:/mnt/awaxen-data/timescaledb:/var/lib/postgresql/data
       - ./scripts/init-timescale.sql:/docker-entrypoint-initdb.d/01-init-timescale.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-awaxen_user} -d ${DB_NAME:-awaxen_core}"]
@@ -277,6 +286,11 @@ services:
       - mqtt_log:/mosquitto/log
       - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./config/mosquitto/password.txt:/mosquitto/config/password.txt:ro
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "test", "-m", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - awaxen_network
 
@@ -303,7 +317,28 @@ services:
       retries: 3
     networks:
       - awaxen_network
-
+    profiles:
+      - minio
+# ============================================
+  # HOME ASSISTANT (SUNUCUDA VARDI, EKLENDI)
+  # ============================================
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: awaxen_homeassistant
+    ports:
+      - "8123:8123"
+    volumes:
+      - /mnt/awaxen-data/homeassistant:/config
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - awaxen_network
+    profiles:
+      - homeassistant
   # ============================================
   # WATCHTOWER - AUTO UPDATE CONTAINERS
   # ============================================
