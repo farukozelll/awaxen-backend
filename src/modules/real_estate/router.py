@@ -272,5 +272,5 @@ async def wipe_tenant_data(
     asset_id: uuid.UUID,
     service: RealEstateServiceDep,
 ) -> None:
-    """Wipe tenant data during handover (owner only)."""
+    """Wipe tenant data during handover (tenant only)."""
     await service.wipe_tenant_data(asset_id)

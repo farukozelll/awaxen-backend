@@ -58,7 +58,7 @@ class ZoneType(str, Enum):
 class AssetMembershipRelation(str, Enum):
     """Relation types for asset membership."""
     TENANT = "tenant"
-    AGENT = "agent"
+  
 
 
 class TenancyStatus(str, Enum):
@@ -404,7 +404,7 @@ class AssetMembership(Base):
     relation: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
-        comment="tenant/agent",
+        comment="tenant",
     )
     
     scopes: Mapped[list[str]] = mapped_column(

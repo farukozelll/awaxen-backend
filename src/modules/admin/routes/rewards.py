@@ -4,10 +4,12 @@ Admin Routes - Rewards
 Admin AWX puan ve cüzdan yönetimi.
 Tag: 14. 👑 Admin - Rewards
 """
-from fastapi import APIRouter, Depends, Query
+import uuid
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from typing import Optional
 
 from src.modules.admin.dependencies import AdminServiceDep
+from src.modules.admin.services import AdminRewardsServiceDep
 from src.modules.auth.dependencies import require_role
 
 router = APIRouter(tags=["14. 👑 Admin - Rewards"])
@@ -16,18 +18,33 @@ router = APIRouter(tags=["14. 👑 Admin - Rewards"])
 @router.get(
     "/rewards/wallets",
     summary="Tüm AWX Wallet'ları Listele",
-    description="Sistemdeki tüm AWX cüzdanlarını listeler (Admin).",
+    description="Sistemdeki tüm AWX cüzdanlarını listeler (Admin - Cross-tenant).",
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def list_all_wallets(
-    admin_service: AdminServiceDep,
+    rewards_service: AdminRewardsServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("created_at", description="Sıralama alanı"),
     order: str = Query("desc", description="Sıralama yönü: asc, desc"),
+    wallet_type: Optional[str] = Query(None, description="Wallet tipi: company, personal"),
+    organization_id: Optional[str] = Query(None, description="Organizasyon ID filtresi"),
 ):
-    """Tüm AWX wallet'ları listele."""
-    return {"message": "All wallets", "wallets": [], "total": 0, "page": page, "page_size": page_size}
+    """Tüm AWX wallet'ları listele (Cross-tenant)."""
+    try:
+        return await rewards_service.list_all_wallets(
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            order=order,
+            wallet_type=wallet_type,
+            organization_id=organization_id,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Wallet listesi alınamadı: {str(e)}"
+        )
 
 
 @router.get(
@@ -37,13 +54,23 @@ async def list_all_wallets(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def list_organization_wallets(
-    org_id: str,
-    admin_service: AdminServiceDep,
+    org_id: uuid.UUID,
+    rewards_service: AdminRewardsServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """Organizasyon AWX wallet'larını listele."""
-    return {"message": f"Organization {org_id} wallets", "wallets": [], "total": 0}
+    try:
+        return await rewards_service.list_all_wallets(
+            page=page,
+            page_size=page_size,
+            organization_id=str(org_id),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Organizasyon wallet'ları alınamadı: {str(e)}"
+        )
 
 
 @router.get(
@@ -53,17 +80,52 @@ async def list_organization_wallets(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def get_organization_rewards_summary(
-    org_id: str,
-    admin_service: AdminServiceDep,
+    org_id: uuid.UUID,
+    rewards_service: AdminRewardsServiceDep,
 ):
     """Organizasyon AWX özeti."""
-    return {
-        "organization_id": org_id,
-        "total_awx_distributed": 0,
-        "total_awx_spent": 0,
-        "total_awx_balance": 0,
-        "active_streaks": 0,
-    }
+    try:
+        # Get organization wallets
+        org_wallets = await rewards_service.list_all_wallets(
+            page=1,
+            page_size=1000,  # Large page size to get all
+            organization_id=str(org_id),
+        )
+        
+        # Calculate summary
+        total_wallets = org_wallets["total"]
+        total_balance = sum(wallet.balance for wallet in org_wallets["wallets"])
+        
+        # Get recent transactions for this organization
+        recent_tx = await rewards_service.list_all_transactions(
+            page=1,
+            page_size=100,
+            organization_id=str(org_id),
+        )
+        
+        # Calculate credit/debit totals
+        total_credits = sum(
+            tx.amount for tx in recent_tx["transactions"] 
+            if tx.transaction_type == "credit"
+        )
+        total_debits = sum(
+            tx.amount for tx in recent_tx["transactions"] 
+            if tx.transaction_type == "debit"
+        )
+        
+        return {
+            "organization_id": str(org_id),
+            "total_wallets": total_wallets,
+            "total_balance": float(total_balance),
+            "total_credits": float(total_credits),
+            "total_debits": float(total_debits),
+            "transaction_count": recent_tx["total"],
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Organizasyon özeti alınamadı: {str(e)}"
+        )
 
 
 @router.get(
@@ -73,29 +135,56 @@ async def get_organization_rewards_summary(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def get_wallet_detail(
-    wallet_id: str,
-    admin_service: AdminServiceDep,
+    wallet_id: uuid.UUID,
+    rewards_service: AdminRewardsServiceDep,
 ):
     """Wallet detayı."""
-    return {"wallet_id": wallet_id, "balance": 0, "transactions": []}
+    try:
+        return await rewards_service.get_wallet_detail(wallet_id)
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Wallet bulunamadı"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Wallet detayı alınamadı: {str(e)}"
+        )
 
 
 @router.get(
     "/rewards/transactions",
     summary="Tüm AWX Transaction'ları Listele",
-    description="Sistemdeki tüm AWX işlemlerini listeler.",
+    description="Sistemdeki tüm AWX işlemlerini listeler (Cross-tenant).",
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def list_all_transactions(
-    admin_service: AdminServiceDep,
+    rewards_service: AdminRewardsServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    transaction_type: Optional[str] = Query(None, description="İşlem tipi: earn, spend, transfer"),
+    transaction_type: Optional[str] = Query(None, description="İşlem tipi: credit, debit"),
+    wallet_type: Optional[str] = Query(None, description="Wallet tipi: company, personal"),
+    organization_id: Optional[str] = Query(None, description="Organizasyon ID filtresi"),
     sort_by: str = Query("created_at"),
     order: str = Query("desc"),
 ):
-    """Tüm AWX transaction'ları listele."""
-    return {"message": "All transactions", "transactions": [], "total": 0}
+    """Tüm AWX transaction'ları listele (Cross-tenant)."""
+    try:
+        return await rewards_service.list_all_transactions(
+            page=page,
+            page_size=page_size,
+            transaction_type=transaction_type,
+            wallet_type=wallet_type,
+            organization_id=organization_id,
+            sort_by=sort_by,
+            order=order,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transaction listesi alınamadı: {str(e)}"
+        )
 
 
 @router.post(
@@ -105,8 +194,57 @@ async def list_all_transactions(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def adjust_wallet_balance(
-    wallet_id: str,
-    admin_service: AdminServiceDep,
+    wallet_id: uuid.UUID,
+    rewards_service: AdminRewardsServiceDep,
 ):
     """Wallet bakiyesini düzelt."""
-    return {"message": f"Wallet {wallet_id} balance adjusted", "new_balance": 0}
+    try:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Manuel bakiye düzeltme henüz implement edilmedi"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Bakiye düzeltme yapılamadı: {str(e)}"
+        )
+
+
+@router.get(
+    "/rewards/stats/wallets",
+    summary="Sistem Wallet İstatistikleri",
+    description="Tüm sistemdeki wallet istatistiklerini döner.",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def get_wallet_stats(
+    rewards_service: AdminRewardsServiceDep,
+):
+    """Sistem wallet istatistikleri."""
+    try:
+        return await rewards_service.get_system_wallet_stats()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Wallet istatistikleri alınamadı: {str(e)}"
+        )
+
+
+@router.get(
+    "/rewards/stats/transactions",
+    summary="Sistem Transaction İstatistikleri",
+    description="Tüm sistemdeki transaction istatistiklerini döner.",
+    dependencies=[Depends(require_role(["admin"]))],
+)
+async def get_transaction_stats(
+    rewards_service: AdminRewardsServiceDep,
+):
+    """Sistem transaction istatistikleri."""
+    try:
+        return await rewards_service.get_transaction_stats()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Transaction istatistikleri alınamadı: {str(e)}"
+        )

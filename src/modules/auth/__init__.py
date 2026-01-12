@@ -11,6 +11,7 @@ from src.modules.auth.models import (
     MODULE_PERMISSIONS,
 )
 from src.modules.auth.router import router
+from src.modules.auth.tenant_router import tenant_router
 
 __all__ = [
     "User", 
@@ -24,4 +25,5 @@ __all__ = [
     "ROLE_PERMISSIONS",
     "MODULE_PERMISSIONS",
     "router",
+    "tenant_router",
 ]

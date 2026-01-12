@@ -105,9 +105,8 @@ async def sync_auth0_user(
 ) -> Auth0SyncResponse:
     """Auth0 kullanıcısını senkronize et.
     
-    NOT: auth0_id ve email SADECE request body'den alınır.
-    Header'lardan almak güvenlik açığı oluşturur (Header Spoofing).
-    Production'da bu bilgiler Auth0 token'ından decode edilmelidir.
+    GÜVENLİK: Frontend'den gelen role isteğini ez, None yap.
+    Asla client input'tan gelen role güvenme.
     """
     if not request.auth0_id or not request.email:
         raise HTTPException(
@@ -115,18 +114,11 @@ async def sync_auth0_user(
             detail="auth0_id ve email zorunludur"
         )
     
-    role = request.role
-    if role and role in AUTH0_ROLE_MAPPING:
-        role = AUTH0_ROLE_MAPPING[role]
+    # GÜVENLİK: Frontend'den gelen role isteğini ez, None yap.
+    # Kullanıcı kendine admin rolü atayamaz.
+    request.role = None
     
-    sync_request = Auth0SyncRequest(
-        auth0_id=request.auth0_id,
-        email=request.email,
-        name=request.name,
-        role=role,
-    )
-    
-    return await auth_service.sync_auth0_user(sync_request)
+    return await auth_service.sync_auth0_user(request)
 
 
 @router.post(

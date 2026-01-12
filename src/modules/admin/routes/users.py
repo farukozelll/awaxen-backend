@@ -55,7 +55,7 @@ async def list_all_users(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def list_organization_users(
-    org_id: str,
+    org_id: uuid.UUID,
     admin_service: AdminServiceDep,
     page: int = 1,
     page_size: int = 20,
@@ -64,7 +64,7 @@ async def list_organization_users(
     is_active: bool | None = None,
 ) -> AdminUserListResponse:
     return await admin_service.list_organization_users(
-        organization_id=org_id,
+        organization_id=str(org_id),
         page=page,
         page_size=page_size,
         search=search,
@@ -82,11 +82,11 @@ async def list_organization_users(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def add_user_to_organization(
-    org_id: str,
+    org_id: uuid.UUID,
     request: AddUserToOrganizationRequest,
     admin_service: AdminServiceDep,
 ) -> AddUserToOrganizationResponse:
-    request.organization_id = org_id
+    request.organization_id = str(org_id)
     return await admin_service.add_user_to_organization(request)
 
 
@@ -98,11 +98,11 @@ async def add_user_to_organization(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def assign_role_to_user(
-    user_id: str,
+    user_id: uuid.UUID,
     request: AssignRoleToUserRequest,
     admin_service: AdminServiceDep,
 ) -> AssignRoleToUserResponse:
-    return await admin_service.assign_role_to_user(user_id, request)
+    return await admin_service.assign_role_to_user(str(user_id), request)
 
 
 @router.post(
@@ -112,12 +112,12 @@ async def assign_role_to_user(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def revoke_user_sessions(
-    user_id: str,
+    user_id: uuid.UUID,
     admin_service: AdminServiceDep,
     revoke_auth0: bool = True,
 ):
     return await admin_service.revoke_user_sessions_enhanced(
-        user_id=uuid.UUID(user_id),
+        user_id=user_id,
         revoke_auth0=revoke_auth0,
     )
 
@@ -130,7 +130,7 @@ async def revoke_user_sessions(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def impersonate_user(
-    user_id: str,
+    user_id: uuid.UUID,
     admin_service: AdminServiceDep,
     current_user: CurrentUser,
     request: ImpersonateUserRequest | None = None,
@@ -139,7 +139,7 @@ async def impersonate_user(
     duration = request.duration_minutes if request else 60
     return await admin_service.impersonate_user(
         admin_user=current_user,
-        target_user_id=uuid.UUID(user_id),
+        target_user_id=user_id,
         reason=reason,
         duration_minutes=duration,
     )
@@ -152,12 +152,12 @@ async def impersonate_user(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def ban_user(
-    user_id: str,
+    user_id: uuid.UUID,
     admin_service: AdminServiceDep,
     reason: str | None = None,
 ):
     return await admin_service.ban_user(
-        user_id=uuid.UUID(user_id),
+        user_id=user_id,
         reason=reason,
     )
 
@@ -169,14 +169,14 @@ async def ban_user(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def remove_user_from_organization(
-    org_id: str,
-    user_id: str,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
     admin_service: AdminServiceDep,
 ):
     """Kullanıcıyı organizasyondan çıkar."""
     return await admin_service.remove_user_from_organization(
-        organization_id=uuid.UUID(org_id),
-        user_id=uuid.UUID(user_id),
+        organization_id=org_id,
+        user_id=user_id,
     )
 
 
@@ -191,14 +191,14 @@ async def remove_user_from_organization(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def create_invitation(
-    org_id: str,
+    org_id: uuid.UUID,
     request: InvitationCreateRequest,
     admin_service: AdminServiceDep,
     current_user: CurrentUser,
 ) -> InvitationResponse:
     """Admin olarak davetiye oluştur ve email gönder."""
     invitation = await admin_service.create_invitation(
-        organization_id=uuid.UUID(org_id),
+        organization_id=org_id,
         email=request.email,
         role_code=request.role,
         invited_by=current_user,
@@ -228,13 +228,13 @@ async def create_invitation(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def list_invitations(
-    org_id: str,
+    org_id: uuid.UUID,
     admin_service: AdminServiceDep,
     include_used: bool = False,
 ) -> InvitationListResponse:
     """Organizasyonun davetiyelerini listele."""
     invitations = await admin_service.get_organization_invitations(
-        organization_id=uuid.UUID(org_id),
+        organization_id=org_id,
         include_used=include_used,
     )
     
@@ -264,12 +264,12 @@ async def list_invitations(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def revoke_invitation(
-    invitation_id: str,
+    invitation_id: uuid.UUID,
     admin_service: AdminServiceDep,
     current_user: CurrentUser,
 ):
     """Davetiyeyi iptal et."""
     return await admin_service.revoke_invitation(
-        invitation_id=uuid.UUID(invitation_id),
-        current_user=current_user,
+        invitation_id=invitation_id,
+        revoked_by=current_user,
     )

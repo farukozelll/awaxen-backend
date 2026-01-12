@@ -1688,14 +1688,24 @@ class AuthService:
         from src.modules.auth.schemas import AdminUserListItem, AdminUserListResponse, RoleInfo, OrganizationResponse
         
         # Base query - sadece belirtilen organizasyondaki kullanıcılar
+        # PERFORMANCE: Sadece ilgili organizasyon membership'ını yükle
         stmt = (
             select(User)
             .join(OrganizationUser)
             .where(OrganizationUser.organization_id == organization_id)
             .options(
-                selectinload(User.organization_memberships)
+                # Sadece bu organizasyondaki membership'ı yükle (N+1 çözümü)
+                selectinload(
+                    User.organization_memberships.and_(
+                        OrganizationUser.organization_id == organization_id
+                    )
+                )
                 .selectinload(OrganizationUser.role),
-                selectinload(User.organization_memberships)
+                selectinload(
+                    User.organization_memberships.and_(
+                        OrganizationUser.organization_id == organization_id
+                    )
+                )
                 .selectinload(OrganizationUser.organization),
             )
         )
@@ -1735,20 +1745,19 @@ class AuthService:
         result = await self.db.execute(stmt)
         users = result.scalars().all()
         
-        # Build response
+        # Build response - ARTIK PYTHON'DA FİLTRELEME YOK
         items = []
         for user in users:
             role_info = None
             org_response = None
             
-            # Bu organizasyondaki üyeliği bul
-            for m in user.organization_memberships:
-                if m.organization_id == organization_id:
-                    if m.role:
-                        role_info = RoleInfo(code=m.role.code, name=m.role.name)
-                    if m.organization:
-                        org_response = OrganizationResponse.model_validate(m.organization)
-                    break
+            # PERFORMANCE: Sadece 1 membership var (o organizasyondaki)
+            if user.organization_memberships:
+                membership = user.organization_memberships[0]  # İlk ve tek eleman
+                if membership.role:
+                    role_info = RoleInfo(code=membership.role.code, name=membership.role.name)
+                if membership.organization:
+                    org_response = OrganizationResponse.model_validate(membership.organization)
             
             items.append(AdminUserListItem(
                 id=user.id,
@@ -2809,9 +2818,9 @@ class AuthService:
             raise PermissionDeniedError("Bu organizasyona davet gönderme yetkiniz yok")
         
         # Rol kontrolü - tenant sadece user/device atayabilir
-        if role_code not in ["user", "device"]:
-            if not is_tenant:
-                raise PermissionDeniedError("Sadece 'user' veya 'device' rolü atayabilirsiniz")
+        allowed_roles = ["user", "device"]
+        if role_code not in allowed_roles:
+            raise PermissionDeniedError(f"Tenant sadece şu rolleri atayabilir: {allowed_roles}")
         
         # Aynı email için aktif davetiye var mı?
         existing = await self._get_pending_invitations(email)

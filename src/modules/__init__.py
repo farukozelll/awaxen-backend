@@ -8,7 +8,6 @@ Awaxen Backend Modules
 - notifications: Push, telegram, in-app notifications
 - compliance: KVKK/GDPR consents, audit logs
 - energy: Recommendations, commands, rewards, streaks
-- marketplace: Alarms, maintenance jobs, operator management
 - integrations: EPİAŞ, weather, external APIs
 - dashboard: Analytics and summary data
 """

@@ -7,8 +7,7 @@ Bu endpoint'ler sadece kendi organizasyonlarını yönetebilir.
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.modules.admin.dependencies import AdminServiceDep
-from src.modules.auth.dependencies import require_role
+from src.modules.auth.dependencies import require_role, AuthServiceDep
 from src.modules.auth.schemas import (
     AdminUserListResponse,
     InvitationCreateRequest,
@@ -30,8 +29,8 @@ tenant_router = APIRouter(
     dependencies=[Depends(require_role(["admin", "tenant"]))],
 )
 async def list_organization_users(
-    org_id: str,
-    admin_service: AdminServiceDep,
+    org_id: uuid.UUID,
+    auth_service: AuthServiceDep,
     page: int = 1,
     page_size: int = 20,
     search: str | None = None,
@@ -39,8 +38,8 @@ async def list_organization_users(
     is_active: bool | None = None,
 ) -> AdminUserListResponse:
     """Organizasyon kullanıcılarını listele."""
-    return await admin_service.list_organization_users(
-        organization_id=org_id,
+    return await auth_service.list_organization_users(
+        organization_id=str(org_id),
         page=page,
         page_size=page_size,
         search=search,
@@ -62,22 +61,14 @@ async def list_organization_users(
     dependencies=[Depends(require_role(["admin", "tenant"]))],
 )
 async def create_invitation(
-    org_id: str,
+    org_id: uuid.UUID,
     request: InvitationCreateRequest,
     current_user,
-    admin_service: AdminServiceDep,
+    auth_service: AuthServiceDep,
 ) -> InvitationResponse:
     """Organizasyona kullanıcı davet et."""
-    try:
-        org_uuid = uuid.UUID(org_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Geçersiz organizasyon ID formatı",
-        )
-    
-    invitation = await admin_service.create_invitation(
-        organization_id=org_uuid,
+    invitation = await auth_service.create_invitation(
+        organization_id=org_id,
         email=request.email,
         role_code=request.role,
         invited_by=current_user,
@@ -107,22 +98,14 @@ async def create_invitation(
     dependencies=[Depends(require_role(["admin", "tenant"]))],
 )
 async def list_invitations(
-    org_id: str,
+    org_id: uuid.UUID,
     current_user,
-    admin_service: AdminServiceDep,
+    auth_service: AuthServiceDep,
     include_used: bool = False,
 ) -> InvitationListResponse:
     """Organizasyonun davetiyelerini listele."""
-    try:
-        org_uuid = uuid.UUID(org_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Geçersiz organizasyon ID formatı",
-        )
-    
-    invitations = await admin_service.get_organization_invitations(
-        organization_id=org_uuid,
+    invitations = await auth_service.get_organization_invitations(
+        organization_id=org_id,
         include_used=include_used,
     )
     
@@ -152,20 +135,12 @@ async def list_invitations(
     dependencies=[Depends(require_role(["admin", "tenant"]))],
 )
 async def revoke_invitation(
-    invitation_id: str,
+    invitation_id: uuid.UUID,
     current_user,
-    admin_service: AdminServiceDep,
+    auth_service: AuthServiceDep,
 ):
     """Davetiyeyi iptal et."""
-    try:
-        inv_uuid = uuid.UUID(invitation_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Geçersiz davetiye ID formatı",
-        )
-    
-    result = await admin_service.revoke_invitation(inv_uuid, current_user)
+    result = await auth_service.revoke_invitation(invitation_id, current_user)
     return result
 
 
@@ -181,9 +156,9 @@ async def revoke_invitation(
     dependencies=[Depends(require_role(["admin", "tenant"]))],
 )
 async def remove_user_from_organization(
-    org_id: str,
-    user_id: str,
-    admin_service: AdminServiceDep,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    auth_service: AuthServiceDep,
 ):
     """
     Kullanıcıyı organizasyondan çıkar (Soft Delete).
@@ -192,17 +167,13 @@ async def remove_user_from_organization(
     - Organizasyon üyeliği kaldırılır
     - Auth0'dan engellenmez (sadece bu org'dan çıkar)
     """
-    try:
-        org_uuid = uuid.UUID(org_id)
-        user_uuid = uuid.UUID(user_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Geçersiz ID formatı",
-        )
+    # NOTE: This method should be moved to AuthService to avoid circular dependency
+    # For now, we'll implement a basic version here
+    from src.modules.admin.service import AdminService
+    admin_service = AdminService(auth_service.db)
     
     result = await admin_service.remove_user_from_organization(
-        organization_id=org_uuid,
-        user_id=user_uuid,
+        organization_id=org_id,
+        user_id=user_id,
     )
     return result

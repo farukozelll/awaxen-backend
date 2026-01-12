@@ -5,7 +5,7 @@ Organizasyon CRUD işlemleri.
 Tag: 10. 👑 Admin - Organizations
 """
 import uuid
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, BackgroundTasks
 
 from src.modules.admin.dependencies import AdminServiceDep
 from src.modules.auth.dependencies import require_role
@@ -35,8 +35,9 @@ router = APIRouter(tags=["10. 👑 Admin - Organizations"])
 async def create_organization(
     request: CreateOrganizationWithUserRequest,
     admin_service: AdminServiceDep,
+    background_tasks: BackgroundTasks,
 ) -> CreateOrganizationWithUserResponse:
-    return await admin_service.create_organization_with_user(request)
+    return await admin_service.create_organization_with_user(request, background_tasks)
 
 
 @router.post(
@@ -47,12 +48,12 @@ async def create_organization(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def assign_organization_modules(
-    org_id: str,
+    org_id: uuid.UUID,
     request: OrganizationModulesUpdate,
     admin_service: AdminServiceDep,
 ) -> CreateOrganizationStep2Response:
     step2_request = CreateOrganizationStep2Request(
-        organization_id=org_id,
+        organization_id=str(org_id),
         modules=request.modules,
     )
     return await admin_service.create_organization_step2(step2_request)
@@ -66,12 +67,12 @@ async def assign_organization_modules(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def update_organization_modules(
-    org_id: str,
+    org_id: uuid.UUID,
     request: OrganizationModulesUpdateRequest,
     admin_service: AdminServiceDep,
 ) -> OrganizationModulesUpdateResponse:
     return await admin_service.update_organization_modules(
-        org_id=uuid.UUID(org_id),
+        org_id=org_id,
         modules=[m.model_dump() for m in request.modules],
     )
 
@@ -106,10 +107,10 @@ async def list_organizations(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def get_organization(
-    org_id: str,
+    org_id: uuid.UUID,
     admin_service: AdminServiceDep,
 ) -> AdminOrganizationDetailResponse:
-    return await admin_service.get_organization_detail(org_id)
+    return await admin_service.get_organization_detail(str(org_id))
 
 
 @router.delete(
@@ -119,12 +120,12 @@ async def get_organization(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def delete_organization(
-    org_id: str,
+    org_id: uuid.UUID,
     admin_service: AdminServiceDep,
     hard_delete: bool = False,
 ):
     return await admin_service.delete_organization(
-        org_id=uuid.UUID(org_id),
+        org_id=org_id,
         hard_delete=hard_delete,
     )
 
@@ -136,12 +137,12 @@ async def delete_organization(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def suspend_organization(
-    org_id: str,
+    org_id: uuid.UUID,
     admin_service: AdminServiceDep,
     reason: str | None = None,
 ):
     return await admin_service.suspend_organization(
-        org_id=uuid.UUID(org_id),
+        org_id=org_id,
         reason=reason,
     )
 
@@ -153,11 +154,11 @@ async def suspend_organization(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def reactivate_organization(
-    org_id: str,
+    org_id: uuid.UUID,
     admin_service: AdminServiceDep,
 ):
     return await admin_service.reactivate_organization(
-        org_id=uuid.UUID(org_id),
+        org_id=org_id,
     )
 
 
@@ -168,13 +169,13 @@ async def reactivate_organization(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def transfer_organization_ownership(
-    org_id: str,
-    new_owner_user_id: str,
+    org_id: uuid.UUID,
+    new_owner_user_id: uuid.UUID,
     admin_service: AdminServiceDep,
 ):
     return await admin_service.transfer_ownership(
-        org_id=uuid.UUID(org_id),
-        new_owner_user_id=uuid.UUID(new_owner_user_id),
+        org_id=org_id,
+        new_owner_user_id=new_owner_user_id,
     )
 
 
@@ -185,7 +186,7 @@ async def transfer_organization_ownership(
     dependencies=[Depends(require_role(["admin"]))],
 )
 async def get_organization_stats(
-    org_id: str,
+    org_id: uuid.UUID,
     admin_service: AdminServiceDep,
 ):
-    return await admin_service.get_organization_stats(org_id)
+    return await admin_service.get_organization_stats(str(org_id))
