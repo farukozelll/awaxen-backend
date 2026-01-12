@@ -19,7 +19,10 @@ class Settings(BaseSettings):
 
     # Application
     project_name: str = "Awaxen"
-    environment: str = Field(default="development", description="development | staging | production")
+    environment: str = Field(
+        default="development", 
+        description="development | staging | production"
+    )
     debug: bool = Field(default=True, alias="FLASK_DEBUG")
     api_v1_str: str = "/api/v1"
 
@@ -41,13 +44,24 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://redis:6379/0", description="Redis connection URL")
 
     # MQTT - IoT (Shelly devices)
-    mqtt_broker_host: str = Field(default="mqtt", alias="MQTT_BROKER_HOST", description="MQTT Broker hostname")
-    mqtt_broker_url: str = Field(default="mqtt", alias="MQTT_BROKER_URL", description="MQTT Broker hostname (alias)")
+    mqtt_broker_host: str = Field(
+        default="mqtt", 
+        alias="MQTT_BROKER_HOST", 
+        description="MQTT Broker hostname"
+    )
+    mqtt_broker_url: str = Field(
+        default="mqtt", 
+        alias="MQTT_BROKER_URL", 
+        description="MQTT Broker hostname (alias)"
+    )
     mqtt_broker_port: int = Field(default=1883, description="MQTT Broker port")
     mqtt_username: str = Field(default="awaxen_admin", description="MQTT username")
     mqtt_password: str = Field(default="", description="MQTT password")
     mqtt_client_id: str = Field(default="awaxen-backend", description="MQTT Client ID")
-    mqtt_sensor_topic: str = Field(default="awaxen/sensors/#", description="MQTT sensor topic pattern")
+    mqtt_sensor_topic: str = Field(
+        default="awaxen/sensors/#", 
+        description="MQTT sensor topic pattern"
+    )
 
     # MinIO - S3 Compatible Storage
     minio_endpoint: str = Field(default="minio:9000", description="MinIO endpoint")
@@ -60,18 +74,27 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="CHANGE_ME_IN_PRODUCTION", description="JWT/Flask Secret Key")
     algorithm: str = Field(default="HS256", description="JWT Algorithm")
     access_token_expire_minutes: int = Field(default=60 * 24, description="Token expiry in minutes")
-    encryption_key: str = Field(default="", description="Fernet key for encrypting sensitive data (API keys)")
+    encryption_key: str = Field(
+        default="", 
+        description="Fernet key for encrypting sensitive data (API keys)"
+    )
 
     # Auth0
     auth0_domain: str = Field(default="", description="Auth0 domain")
     auth0_audience: str = Field(default="", description="Auth0 API audience")
     auth0_client_id: str = Field(default="", description="Auth0 client ID")
-    auth0_client_secret: str = Field(default="", description="Auth0 client secret for Management API")
+    auth0_client_secret: str = Field(
+        default="", 
+        description="Auth0 client secret for Management API"
+    )
     auth0_management_audience: str = Field(default="", description="Auth0 Management API audience")
 
     # CORS
     cors_origins: str = Field(default="http://localhost:3005", description="Allowed CORS origins")
-    backend_cors_origins: str = Field(default="", description="CORS origins as comma-separated string")
+    backend_cors_origins: str = Field(
+        default="", 
+        description="CORS origins as comma-separated string"
+    )
 
     # Superuser
     first_superuser_email: str | None = None
@@ -80,7 +103,10 @@ class Settings(BaseSettings):
 
     # Celery
     celery_broker_url: str = Field(default="redis://redis:6379/0", description="Celery broker URL")
-    celery_result_backend: str = Field(default="redis://redis:6379/0", description="Celery result backend")
+    celery_result_backend: str = Field(
+        default="redis://redis:6379/0", 
+        description="Celery result backend"
+    )
 
     # Telemetry Batch Settings
     telemetry_batch_size: int = Field(default=100, description="Batch size for telemetry inserts")
@@ -98,7 +124,10 @@ class Settings(BaseSettings):
     telegram_bot_username: str = Field(default="AwaxenBot", description="Telegram bot username")
     
     # Firebase Cloud Messaging (FCM)
-    firebase_credentials_path: str = Field(default="", description="Path to Firebase service account JSON")
+    firebase_credentials_path: str = Field(
+        default="", 
+        description="Path to Firebase service account JSON"
+    )
     firebase_project_id: str = Field(default="", description="Firebase project ID")
     firebase_vapid_key: str = Field(default="", description="Firebase VAPID key for web push")
 
@@ -117,7 +146,10 @@ class Settings(BaseSettings):
     rate_limit_ai_requests_per_minute: int = Field(default=10, description="AI endpoint rate limit")
 
     # PostGIS
-    postgis_enabled: bool = Field(default=False, description="Enable PostGIS for geo-spatial queries")
+    postgis_enabled: bool = Field(
+        default=False, 
+        description="Enable PostGIS for geo-spatial queries"
+    )
 
     # Resend Email
     resend_api_key: str = Field(default="", description="Resend API key for sending emails")

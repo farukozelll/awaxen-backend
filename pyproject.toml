@@ -95,6 +95,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC", "N", "S", "C4", "DTZ", "T20"
 ignore = [
     "S106",  # Hardcoded password in function argument (token types, not passwords)
     "S107",  # Hardcoded password in default value (token types, not passwords)
+    "B008",  # Depends() in function defaults (FastAPI dependency injection pattern)
 ]
 
 [tool.ruff.lint.per-file-ignores]
