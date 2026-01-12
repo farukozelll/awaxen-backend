@@ -100,6 +100,7 @@ ignore = [
     "RUF002", # Turkish characters (ı, ş, ğ, ç, ö, ü) in docstrings
     "RUF003", # Turkish characters (ı, ş, ğ, ç, ö, ü) in comments
     "S104",  # Binding to all interfaces (0.0.0.0) - Docker development
+    "B904",  # Exception handling without from err (FastAPI pattern)
 ]
 
 [tool.ruff.lint.per-file-ignores]

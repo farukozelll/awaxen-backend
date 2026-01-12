@@ -15,9 +15,9 @@ from fastapi import APIRouter
 
 from src.modules.admin.routes import (
     organizations_router,
-    users_router,
-    system_router,
     rewards_router,
+    system_router,
+    users_router,
 )
 
 # Ana Admin Router - Prefix /admin

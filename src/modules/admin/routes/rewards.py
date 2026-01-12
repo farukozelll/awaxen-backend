@@ -5,10 +5,9 @@ Admin AWX puan ve cüzdan yönetimi.
 Tag: 14. 👑 Admin - Rewards
 """
 import uuid
-from fastapi import APIRouter, Depends, Query, HTTPException, status
-from typing import Optional
 
-from src.modules.admin.dependencies import AdminServiceDep
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
 from src.modules.admin.services import AdminRewardsServiceDep
 from src.modules.auth.dependencies import require_role
 
@@ -27,8 +26,8 @@ async def list_all_wallets(
     page_size: int = Query(20, ge=1, le=100),
     sort_by: str = Query("created_at", description="Sıralama alanı"),
     order: str = Query("desc", description="Sıralama yönü: asc, desc"),
-    wallet_type: Optional[str] = Query(None, description="Wallet tipi: company, personal"),
-    organization_id: Optional[str] = Query(None, description="Organizasyon ID filtresi"),
+    wallet_type: str | None = Query(None, description="Wallet tipi: company, personal"),
+    organization_id: str | None = Query(None, description="Organizasyon ID filtresi"),
 ):
     """Tüm AWX wallet'ları listele (Cross-tenant)."""
     try:
@@ -43,8 +42,8 @@ async def list_all_wallets(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Wallet listesi alınamadı: {str(e)}"
-        )
+            detail=f"Wallet listesi alınamadı: {e!s}"
+        ) from e
 
 
 @router.get(
@@ -69,7 +68,7 @@ async def list_organization_wallets(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Organizasyon wallet'ları alınamadı: {str(e)}"
+            detail=f"Organizasyon wallet'ları alınamadı: {e!s}"
         )
 
 
@@ -124,7 +123,7 @@ async def get_organization_rewards_summary(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Organizasyon özeti alınamadı: {str(e)}"
+            detail=f"Organizasyon özeti alınamadı: {e!s}"
         )
 
 
@@ -149,7 +148,7 @@ async def get_wallet_detail(
             )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Wallet detayı alınamadı: {str(e)}"
+            detail=f"Wallet detayı alınamadı: {e!s}"
         )
 
 
@@ -163,9 +162,9 @@ async def list_all_transactions(
     rewards_service: AdminRewardsServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    transaction_type: Optional[str] = Query(None, description="İşlem tipi: credit, debit"),
-    wallet_type: Optional[str] = Query(None, description="Wallet tipi: company, personal"),
-    organization_id: Optional[str] = Query(None, description="Organizasyon ID filtresi"),
+    transaction_type: str | None = Query(None, description="İşlem tipi: credit, debit"),
+    wallet_type: str | None = Query(None, description="Wallet tipi: company, personal"),
+    organization_id: str | None = Query(None, description="Organizasyon ID filtresi"),
     sort_by: str = Query("created_at"),
     order: str = Query("desc"),
 ):
@@ -183,7 +182,7 @@ async def list_all_transactions(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Transaction listesi alınamadı: {str(e)}"
+            detail=f"Transaction listesi alınamadı: {e!s}"
         )
 
 
@@ -208,7 +207,7 @@ async def adjust_wallet_balance(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Bakiye düzeltme yapılamadı: {str(e)}"
+            detail=f"Bakiye düzeltme yapılamadı: {e!s}"
         )
 
 
@@ -227,7 +226,7 @@ async def get_wallet_stats(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Wallet istatistikleri alınamadı: {str(e)}"
+            detail=f"Wallet istatistikleri alınamadı: {e!s}"
         )
 
 
@@ -246,5 +245,5 @@ async def get_transaction_stats(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Transaction istatistikleri alınamadı: {str(e)}"
+            detail=f"Transaction istatistikleri alınamadı: {e!s}"
         )

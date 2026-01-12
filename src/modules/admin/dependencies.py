@@ -11,10 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.modules.admin.service import AdminService
 from src.modules.admin.services import (
-    AdminOrganizationServiceDep,
-    AdminUserServiceDep,
     AdminInvitationServiceDep,
+    AdminOrganizationServiceDep,
     AdminSystemServiceDep,
+    AdminUserServiceDep,
 )
 
 
