@@ -8,14 +8,15 @@ Organizasyon yönetimi işlemleri.
 - Transfer ownership
 """
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.core.exceptions import ConflictError, NotFoundError
+from src.core.exceptions import NotFoundError
+from src.core.logging import get_logger
 from src.modules.auth.models import (
     ModuleType,
     Organization,
@@ -26,16 +27,15 @@ from src.modules.auth.models import (
 )
 from src.modules.auth.schemas import (
     AdminOrganizationDetailResponse,
-    AdminOrganizationListResponse,
     AdminOrganizationListItem,
+    AdminOrganizationListResponse,
     CreateOrganizationStep2Request,
     CreateOrganizationStep2Response,
+    OrganizationModuleResponse,
     OrganizationResponse,
     OrganizationWalletSummary,
     OrganizationWithModulesResponse,
-    OrganizationModuleResponse,
 )
-from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     pass
@@ -96,9 +96,9 @@ class AdminOrganizationService:
                 .group_by(Device.organization_id)
                 .subquery()
             )
-        except Exception:
+        except Exception as e:
             # IoT modülü yoksa device_count = 0 olarak kalacak
-            pass
+            logger.debug("IoT module not available for device count", error=str(e))
         
         # 2. Ana sorguyu oluştur - TEK SORGUDA HER ŞEYİ ÇEK
         stmt = (
@@ -247,7 +247,7 @@ class AdminOrganizationService:
             .join(OrganizationUser)
             .where(
                 OrganizationUser.organization_id == org_uuid,
-                User.is_active == True
+                User.is_active
             )
         )
         
@@ -259,7 +259,7 @@ class AdminOrganizationService:
             .group_by(Role.code)
         )
         
-        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        thirty_days_ago = datetime.now(datetime.UTC) - timedelta(days=30)
         recent_activity_stmt = (
             select(func.count(User.id))
             .join(OrganizationUser)
@@ -332,7 +332,7 @@ class AdminOrganizationService:
             raise NotFoundError("Organization", org_id)
         
         org.is_active = False
-        org.suspended_at = datetime.now(timezone.utc)
+        org.suspended_at = datetime.now(datetime.UTC)
         org.suspended_reason = reason
         
         await self.db.commit()
@@ -444,7 +444,6 @@ class AdminOrganizationService:
             raise NotFoundError("User is not a member of this organization")
         
         # Yeni sahibe tenant rolü ata
-        from src.modules.auth.models import RoleType
         tenant_role = await self._get_or_create_role("tenant")
         membership.role_id = tenant_role.id
         
@@ -482,7 +481,7 @@ class AdminOrganizationService:
         modules_to_add = set(request.modules)
         modules_to_add.add(ModuleType.CORE.value)
         
-        now = datetime.now(timezone.utc)
+        now = datetime.now(datetime.UTC)
         for module_code in modules_to_add:
             if module_code not in [m.value for m in ModuleType]:
                 logger.warning("Invalid module code", module_code=module_code)
@@ -559,7 +558,7 @@ class AdminOrganizationService:
             for module in existing_modules:
                 if module.module_code == module_code:
                     module.is_active = True
-                    module.activated_at = datetime.now(timezone.utc)
+                    module.activated_at = datetime.now(datetime.UTC)
                     break
             else:
                 # Yeni modül oluştur
@@ -567,7 +566,7 @@ class AdminOrganizationService:
                     organization_id=org_id,
                     module_code=module_code,
                     is_active=True,
-                    activated_at=datetime.now(timezone.utc),
+                    activated_at=datetime.now(datetime.UTC),
                 )
                 self.db.add(new_module)
         
@@ -583,7 +582,7 @@ class AdminOrganizationService:
             "status": "updated",
             "organization_id": str(org_id),
             "modules": modules,
-            "message": f"Organizasyon modülleri güncellendi",
+            "message": "Organizasyon modülleri güncellendi",
         }
     
     # =========================================================================
@@ -594,7 +593,7 @@ class AdminOrganizationService:
         """Organizasyonun aktif modüllerini döner."""
         stmt = select(OrganizationModule).where(
             OrganizationModule.organization_id == organization_id,
-            OrganizationModule.is_active == True,
+            OrganizationModule.is_active,
         )
         result = await self.db.execute(stmt)
         modules = result.scalars().all()
@@ -606,7 +605,7 @@ class AdminOrganizationService:
         from decimal import Decimal
         
         try:
-            from src.modules.billing.models import Wallet, WalletType
+            from src.modules.billing.models import WalletType
             from src.modules.billing.service import BillingService
             
             # BillingService oluştur
