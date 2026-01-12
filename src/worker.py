@@ -13,7 +13,6 @@ celery_app = Celery(
     backend=settings.celery_result_backend,
     include=[
         "src.tasks.telemetry",
-        "src.tasks.billing",
         "src.tasks.notifications",
         "src.tasks.integrations",
     ],
@@ -33,11 +32,6 @@ celery_app.conf.update(
     worker_concurrency=4,
     result_expires=3600,  # 1 hour
     beat_schedule={
-        # Billing tasks
-        "check-overdue-invoices": {
-            "task": "src.tasks.billing.check_overdue_invoices",
-            "schedule": 3600.0,  # Every hour
-        },
         # Telemetry tasks
         "cleanup-old-telemetry": {
             "task": "src.tasks.telemetry.cleanup_old_telemetry",
