@@ -132,6 +132,24 @@ class Gateway(Base, TenantMixin):
         nullable=True,
     )
     
+    # Health SLA tracking
+    health_status: Mapped[str] = mapped_column(
+        String(20),
+        default="unknown",
+        nullable=False,
+        comment="healthy/degraded/offline/unknown - for SLA monitoring",
+    )
+    last_data_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Last telemetry data received timestamp",
+    )
+    offline_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When gateway went offline (for SLA calculation)",
+    )
+    
     # Configuration
     config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     
@@ -261,11 +279,17 @@ class Device(Base, TenantMixin):
         comment="Device-specific configuration",
     )
     
-    # Metadata
+    # Metadata - Flexible device attributes
+    # Recommended fields:
+    #   - ingestion_path: "modbus" | "ha" | "api" | "mqtt" - data source
+    #   - coverage_label: "Kat3 odalar" - human-readable coverage (V2: use device_coverage table)
+    #   - rated_power_w: 2000 - device rated power for estimation
+    #   - installation_date: "2024-01-15" - for warranty/maintenance
     metadata_: Mapped[dict | None] = mapped_column(
         "metadata",
         JSONB,
         nullable=True,
+        comment="Flexible attrs: ingestion_path, coverage_label, rated_power_w, etc.",
     )
     
     # Relationships
@@ -280,6 +304,73 @@ class Device(Base, TenantMixin):
     )
 
 
+class MetricDefinition(Base, TenantMixin):
+    """
+    Metric definition for standardized telemetry data.
+    
+    Prevents metric_name pollution by defining canonical metrics.
+    Each organization can have custom metrics but must define them here.
+    """
+    __tablename__ = "metric_definition"
+    
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_metric_def_org_name"),
+        Index("ix_metric_def_device_type", "device_type"),
+    )
+    
+    # Metric identification
+    name: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Canonical metric name (e.g., power, voltage, temperature)",
+    )
+    
+    # Display name for UI
+    display_name: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Human-readable name for UI",
+    )
+    
+    # Unit
+    unit: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="Standard unit (e.g., W, V, °C)",
+    )
+    
+    # Device type this metric applies to (optional)
+    device_type: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+        index=True,
+        comment="Device type this metric applies to (null = all)",
+    )
+    
+    # Canonical name for cross-org analytics
+    canonical_name: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Standard name for cross-org comparison (e.g., active_power)",
+    )
+    
+    # Value constraints
+    min_value: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 6),
+        nullable=True,
+        comment="Minimum valid value",
+    )
+    max_value: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 6),
+        nullable=True,
+        comment="Maximum valid value",
+    )
+    
+    # Description
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class TelemetryData(Base):
     """
     Telemetry data model - TimescaleDB Hypertable.
@@ -291,6 +382,17 @@ class TelemetryData(Base):
     
     TRICK: Use batch inserts for high-throughput IoT data.
     Never insert readings one by one - buffer and batch insert.
+    
+    NOTE: organization_id is denormalized from device for query performance.
+    Always populate organization_id when inserting telemetry data.
+    
+    METRIC NAMING CONSISTENCY:
+    - metric_name (VARCHAR): Legacy field, always populated for backward compat
+    - metric_definition_id (UUID): Optional FK to metric_definition for standardization
+    
+    Insert pipeline rule:
+    1. If metric_definition_id is provided, derive metric_name from canonical_name
+    2. V2: Consider making metric_name nullable and using only metric_definition_id
     """
     __tablename__ = "telemetry_data"
     
@@ -298,6 +400,9 @@ class TelemetryData(Base):
         Index("ix_telemetry_device_time", "device_id", "timestamp"),
         Index("ix_telemetry_time", "timestamp"),
         Index("ix_telemetry_metric", "metric_name", "timestamp"),
+        # NEW: Denormalized org index for tenant filtering without joins
+        Index("ix_telemetry_org_time", "organization_id", "timestamp"),
+        Index("ix_telemetry_org_device_time", "organization_id", "device_id", "timestamp"),
     )
     
     # Override base id - use composite key for hypertable
@@ -322,12 +427,31 @@ class TelemetryData(Base):
         index=True,
     )
     
+    # DENORMALIZED: Organization ID for fast tenant filtering
+    # Populated from device.organization_id on insert
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organization.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="Denormalized from device for query performance",
+    )
+    
     # Metric identification
     metric_name: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
         index=True,
         comment="e.g., voltage, current, power, temperature, humidity",
+    )
+    
+    # Optional reference to metric definition (for validation)
+    metric_definition_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("metric_definition.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Optional reference to metric definition",
     )
     
     # Value
@@ -516,4 +640,80 @@ class DeviceStateEvent(Base):
         default="ha",
         nullable=False,
         comment="ha/manual/system",
+    )
+
+
+class CoverageType(str, Enum):
+    """Device coverage type."""
+    PRIMARY = "primary"       # Main coverage area
+    SECONDARY = "secondary"   # Partial coverage
+    SHARED = "shared"         # Shared with other devices
+
+
+class DeviceCoverage(Base):
+    """
+    Device coverage mapping (V2).
+    
+    Maps which zones/assets a device covers.
+    A floor meter may cover multiple rooms.
+    A room sensor may cover part of a zone.
+    
+    Enables accurate reporting:
+    - "Which devices cover this area?"
+    - "What percentage of this zone is monitored?"
+    """
+    __tablename__ = "device_coverage"
+    
+    __table_args__ = (
+        Index("idx_coverage_device", "device_id"),
+        Index("idx_coverage_asset", "asset_id"),
+        Index("idx_coverage_zone", "zone_id"),
+        UniqueConstraint(
+            "device_id", "asset_id", "zone_id",
+            name="uq_device_coverage_target",
+        ),
+    )
+    
+    device_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("device.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    
+    # Target: Either asset_id or zone_id (zone is more specific)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("asset.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    
+    zone_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("zone.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Coverage ratio (0.0 - 1.0)
+    ratio: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4),
+        default=Decimal("1.0"),
+        nullable=False,
+        comment="Coverage ratio: 1.0 = full, 0.5 = half",
+    )
+    
+    coverage_type: Mapped[str] = mapped_column(
+        String(20),
+        default=CoverageType.PRIMARY.value,
+        nullable=False,
+        comment="primary/secondary/shared",
+    )
+    
+    # Optional notes
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Coverage description, e.g., 'Covers rooms 301-305'",
     )

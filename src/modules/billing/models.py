@@ -187,8 +187,8 @@ class Wallet(Base):
         foreign_keys=[user_id],
     )
     
-    transactions: Mapped[list["Transaction"]] = relationship(
-        "Transaction",
+    transactions: Mapped[list["WalletTransaction"]] = relationship(
+        "WalletTransaction",
         back_populates="wallet",
         cascade="all, delete-orphan",
         # lazy="selectin" REMOVED - Performance issue: loads ALL transactions on every wallet query
@@ -213,12 +213,15 @@ class Wallet(Base):
         return "organization" if self.wallet_type == WalletType.COMPANY else "user"
 
 
-class Transaction(Base):
+class WalletTransaction(Base):
     """
-    Transaction model.
+    Wallet transaction model.
     Records all wallet transactions.
+    
+    Note: Renamed from 'transaction' to 'wallet_transaction'
+    to avoid PostgreSQL reserved word conflicts.
     """
-    __tablename__ = "transaction"
+    __tablename__ = "wallet_transaction"
     
     __table_args__ = (
         Index("ix_transaction_wallet", "wallet_id"),
@@ -281,4 +284,8 @@ class Transaction(Base):
         "Wallet",
         back_populates="transactions",
     )
+
+
+# Backward compatibility alias
+Transaction = WalletTransaction
     
