@@ -13,7 +13,7 @@ from fastapi.responses import ORJSONResponse
 from src.core.config import settings
 from src.core.database import close_db, init_db
 from src.core.exceptions import (
-    AwaxenException,
+    AwaxenError,
     awaxen_exception_handler,
     generic_exception_handler,
     http_exception_handler,
@@ -267,7 +267,7 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
             logger.warning("prometheus_client not installed, skipping metrics")
     
     # Register exception handlers
-    app.add_exception_handler(AwaxenException, awaxen_exception_handler)
+    app.add_exception_handler(AwaxenError, awaxen_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
     
