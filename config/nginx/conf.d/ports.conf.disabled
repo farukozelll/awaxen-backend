@@ -1,0 +1,73 @@
+# ============================================
+# AWAXEN PORT PROXY - api.awaxen.com
+# ============================================
+
+# PgAdmin - Port 5050
+server {
+    listen 443 ssl;
+    server_name api.awaxen.com;
+    
+    # SSL certificates
+    ssl_certificate /etc/nginx/ssl/api.awaxen.com.crt;
+    ssl_certificate_key /etc/nginx/ssl/api.awaxen.com.key;
+    
+    # PgAdmin route
+    location /pgadmin {
+        proxy_pass http://pgadmin/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Script-Name /pgadmin;
+    }
+    
+    # Flower route
+    location /flower {
+        auth_basic "Celery Flower";
+        auth_basic_user_file /etc/nginx/conf.d/.htpasswd;
+        
+        proxy_pass http://flower/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # MinIO Console route
+    location /console {
+        proxy_pass http://minio_console/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    
+    # Home Assistant route
+    location /home {
+        proxy_pass http://homeassistant/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    
+    # API route (default)
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name api.awaxen.com;
+    return 301 https://$host$request_uri;
+}

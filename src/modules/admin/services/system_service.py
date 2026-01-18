@@ -72,6 +72,7 @@ class AdminSystemService:
                 name=role.name,
                 description=role.description,
                 permissions=list(permissions),
+                is_system=role.is_system,
                 created_at=role.created_at,
             ))
         
@@ -97,6 +98,7 @@ class AdminSystemService:
             name=role.name,
             description=role.description,
             permissions=list(permissions),
+            is_system=role.is_system,
             created_at=role.created_at,
         )
     
@@ -175,6 +177,7 @@ class AdminSystemService:
             name=role.name,
             description=role.description,
             permissions=list(permissions),
+            is_system=role.is_system,
             created_at=role.created_at,
         )
     

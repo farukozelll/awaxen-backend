@@ -8,7 +8,7 @@ Organizasyon yönetimi işlemleri.
 - Transfer ownership
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
@@ -108,7 +108,7 @@ class AdminOrganizationService:
         )
         
         # Device count'u ekle (varsa)
-        if device_count_sub:
+        if device_count_sub is not None:
             stmt = stmt.outerjoin(
                 device_count_sub, Organization.id == device_count_sub.c.organization_id
             ).add_columns(device_count_sub.c.device_count)
@@ -259,7 +259,7 @@ class AdminOrganizationService:
             .group_by(Role.code)
         )
         
-        thirty_days_ago = datetime.now(datetime.UTC) - timedelta(days=30)
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         recent_activity_stmt = (
             select(func.count(User.id))
             .join(OrganizationUser)
@@ -332,7 +332,7 @@ class AdminOrganizationService:
             raise NotFoundError("Organization", org_id)
         
         org.is_active = False
-        org.suspended_at = datetime.now(datetime.UTC)
+        org.suspended_at = datetime.now(timezone.utc)
         org.suspended_reason = reason
         
         await self.db.commit()
@@ -481,7 +481,7 @@ class AdminOrganizationService:
         modules_to_add = set(request.modules)
         modules_to_add.add(ModuleType.CORE.value)
         
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(timezone.utc)
         for module_code in modules_to_add:
             if module_code not in [m.value for m in ModuleType]:
                 logger.warning("Invalid module code", module_code=module_code)
@@ -558,7 +558,7 @@ class AdminOrganizationService:
             for module in existing_modules:
                 if module.module_code == module_code:
                     module.is_active = True
-                    module.activated_at = datetime.now(datetime.UTC)
+                    module.activated_at = datetime.now(timezone.utc)
                     break
             else:
                 # Yeni modül oluştur
@@ -566,7 +566,7 @@ class AdminOrganizationService:
                     organization_id=org_id,
                     module_code=module_code,
                     is_active=True,
-                    activated_at=datetime.now(datetime.UTC),
+                    activated_at=datetime.now(timezone.utc),
                 )
                 self.db.add(new_module)
         

@@ -24,7 +24,7 @@ from src.modules.real_estate.models import (
 from src.modules.iot.models import (
     Device, Gateway, TelemetryData, GatewayPairingCode, DeviceAlias, DeviceStateEvent
 )
-from src.modules.billing.models import Invoice, Transaction, Wallet
+from src.modules.billing.models import Wallet
 from src.modules.notifications.models import (
     Notification, UserFCMToken, NotificationPreference
 )
@@ -32,7 +32,6 @@ from src.modules.compliance.models import Consent, AuditLog
 from src.modules.energy.models import (
     Recommendation, Command, CommandProof, RewardLedger, Streak
 )
-from src.modules.marketplace.models import Alarm, Job, JobOffer, JobProof
 
 # Alembic Config object
 config = context.config

@@ -1,7 +1,7 @@
 """Add architectural improvements: telemetry denormalization, saving verification, pricing models
 
 Revision ID: 20260116_arch_improvements
-Revises: 20260111_add_user_status_column
+Revises: 20260111_add_invitation_table
 Create Date: 2026-01-16
 
 Changes:

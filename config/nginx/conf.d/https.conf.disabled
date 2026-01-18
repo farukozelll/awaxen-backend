@@ -1,0 +1,31 @@
+# HTTPS Server - api.awaxen.com
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name api.awaxen.com;
+
+    # SSL certificates
+    ssl_certificate /etc/nginx/ssl/api.awaxen.com.crt;
+    ssl_certificate_key /etc/nginx/ssl/api.awaxen.com.key;
+    
+    # SSL settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+
+    # Proxy to backend
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTP to HTTPS redirect
+server {
+    listen 80;
+    server_name api.awaxen.com;
+    return 301 https://$host$request_uri;
+}

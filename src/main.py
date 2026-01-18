@@ -13,7 +13,7 @@ from fastapi.responses import ORJSONResponse
 from src.core.config import settings
 from src.core.database import close_db, init_db
 from src.core.exceptions import (
-    AwaxenException,
+    AwaxenError,
     awaxen_exception_handler,
     generic_exception_handler,
     http_exception_handler,
@@ -267,7 +267,7 @@ Authorization: Bearer eyJhbGciOiJSUzI1NiIs...
             logger.warning("prometheus_client not installed, skipping metrics")
     
     # Register exception handlers
-    app.add_exception_handler(AwaxenException, awaxen_exception_handler)
+    app.add_exception_handler(AwaxenError, awaxen_exception_handler)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
     
@@ -359,6 +359,7 @@ def _include_routers(app: FastAPI) -> None:
     from src.modules.notifications.router import router as notifications_router
     from src.modules.real_estate.router import router as real_estate_router
     from src.modules.sse.router import router as sse_router
+    from src.modules.socketio.router import router as socketio_router
     
     api_v1_prefix = settings.api_v1_str  # /api/v1
     
@@ -383,6 +384,7 @@ def _include_routers(app: FastAPI) -> None:
         epias_router,
         core_loop_router,  # Core Loop endpoints
         sse_router,
+        socketio_router,
     ]
     
     for router in routers:

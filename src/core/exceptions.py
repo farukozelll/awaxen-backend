@@ -14,7 +14,7 @@ Error Response Format (RFC 7807 inspired):
 }
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -160,7 +160,7 @@ def _build_error_response(
 ) -> ORJSONResponse:
     """Build standardized error response."""
     request_id = _get_request_id(request)
-    timestamp = datetime.now(datetime.UTC).isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     
     return ORJSONResponse(
         status_code=status_code,

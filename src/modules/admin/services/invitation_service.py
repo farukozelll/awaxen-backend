@@ -105,7 +105,7 @@ class AdminInvitationService:
             role_code=role_code,
             invited_by_id=invited_by.id,
             message=message,
-            expires_at=datetime.now(datetime.UTC) + timedelta(hours=expires_hours),
+            expires_at=datetime.now(datetime.timezone.utc) + timedelta(hours=expires_hours),
             is_used=False,
         )
         
@@ -271,7 +271,7 @@ class AdminInvitationService:
         pending_invitations = total_invitations - used_invitations
         
         # Son 7 günde oluşturulanlar
-        seven_days_ago = datetime.now(datetime.UTC) - timedelta(days=7)
+        seven_days_ago = datetime.now(datetime.timezone.utc) - timedelta(days=7)
         recent_stmt = select(func.count(Invitation.id)).where(
             Invitation.created_at >= seven_days_ago
         )
@@ -280,7 +280,7 @@ class AdminInvitationService:
         
         # Süresi geçmiş davetiyeler
         expired_stmt = select(func.count(Invitation.id)).where(
-            Invitation.expires_at < datetime.now(datetime.UTC),
+            Invitation.expires_at < datetime.now(datetime.timezone.utc),
             not Invitation.is_used
         )
         expired_result = await self.db.execute(expired_stmt)
@@ -312,7 +312,7 @@ class AdminInvitationService:
             .where(
                 Invitation.email == email,
                 not Invitation.is_used,
-                Invitation.expires_at > datetime.now(datetime.UTC)
+                Invitation.expires_at > datetime.now(datetime.timezone.utc)
             )
             .order_by(Invitation.created_at.desc())
         )
