@@ -132,9 +132,9 @@ curl -X GET "https://api.awaxen.com/api/v1/iot/gateways?page=1&pageSize=10" \\
 async def list_gateways(
     service: IoTServiceDep,
     page: int = Query(default=1, ge=1, description="Sayfa numarası"),
-    pageSize: int = Query(default=20, ge=1, le=100, alias="pageSize", description="Sayfa başına kayıt"),
-    sortBy: str = Query(default="created_at", alias="sortBy", description="Sıralama alanı"),
-    sortOrder: str = Query(default="desc", alias="sortOrder", description="Sıralama yönü (asc/desc)"),
+    pageSize: int = Query(default=20, ge=1, le=100, alias="pageSize", description="Sayfa başına kayıt"),  # noqa: N803
+    sortBy: str = Query(default="created_at", alias="sortBy", description="Sıralama alanı"),  # noqa: N803
+    sortOrder: str = Query(default="desc", alias="sortOrder", description="Sıralama yönü (asc/desc)"),  # noqa: N803
     status: GatewayStatus | None = None,
     asset_id: uuid.UUID | None = None,
 ) -> PaginatedGatewayResponse:
@@ -220,7 +220,7 @@ class PaginatedDeviceResponse(BaseModel):
 async def list_devices(
     service: IoTServiceDep,
     page: int = Query(default=1, ge=1, description="Sayfa numarası"),
-    pageSize: int = Query(default=20, ge=1, le=100, alias="pageSize", description="Sayfa başına kayıt"),
+    pageSize: int = Query(default=20, ge=1, le=100, alias="pageSize", description="Sayfa başına kayıt"),  # noqa: N803
     asset_id: uuid.UUID | None = None,
     gateway_id: uuid.UUID | None = None,
     device_type: DeviceType | None = None,

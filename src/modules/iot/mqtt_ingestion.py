@@ -116,7 +116,7 @@ class MQTTIngestionService:
         self._running = True
         
         # Start periodic flush task
-        asyncio.create_task(self.buffer.periodic_flush())
+        asyncio.create_task(self.buffer.periodic_flush())  # noqa: RUF006
         
         logger.info(
             "Starting MQTT ingestion service",

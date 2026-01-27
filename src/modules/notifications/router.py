@@ -128,7 +128,7 @@ async def list_notifications(
     current_user: CurrentUser,
     service: NotificationServiceDep,
     page: int = Query(default=1, ge=1, description="Sayfa numarası"),
-    pageSize: int = Query(default=10, ge=1, le=50, alias="pageSize", description="Sayfa başına kayıt"),
+    pageSize: int = Query(default=10, ge=1, le=50, alias="pageSize", description="Sayfa başına kayıt"),  # noqa: N803
     unread_only: bool = Query(default=False, alias="unreadOnly", description="Sadece okunmamışlar"),
 ) -> NotificationListResponse:
     """Kullanıcının bildirimlerini listeler."""

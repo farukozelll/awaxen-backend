@@ -38,7 +38,7 @@ class OrganizationType(str, Enum):
 class Token(BaseModel):
     """JWT Token response."""
     access_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105
 
 
 class TokenPayload(BaseModel):

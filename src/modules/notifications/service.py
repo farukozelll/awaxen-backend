@@ -394,8 +394,8 @@ class NotificationService:
         try:
             now = datetime.now(UTC).time()
             
-            start = datetime.strptime(start_time, "%H:%M").time()
-            end = datetime.strptime(end_time, "%H:%M").time()
+            start = datetime.strptime(start_time, "%H:%M").time()  # noqa: DTZ007
+            end = datetime.strptime(end_time, "%H:%M").time()  # noqa: DTZ007
             
             # Handle overnight quiet hours (e.g., 22:00 - 08:00)
             if start <= end:
