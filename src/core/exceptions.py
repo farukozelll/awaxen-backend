@@ -14,7 +14,7 @@ Error Response Format (RFC 7807 inspired):
 }
 """
 import uuid
-from datetime import datetime, timezone, UTC
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import HTTPException, Request, status

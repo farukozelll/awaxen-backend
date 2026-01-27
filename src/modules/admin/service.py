@@ -103,7 +103,7 @@ class AdminService:
         Diğer organizasyon metodları organization_service'e deleg edilir.
         """
         import secrets
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, UTC
         
         from src.modules.auth.models import (
             Invitation,
@@ -174,7 +174,7 @@ class AdminService:
             organization_id=org.id,
             role_id=role.id,
             is_default=True,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(UTC),
         )
         self.db.add(membership)
         
@@ -187,7 +187,7 @@ class AdminService:
             role_code="tenant",
             invited_by_id=None,  # Sistem tarafından oluşturuldu
             message="Organizasyonunuz oluşturuldu. Hesabınızı aktifleştirin.",
-            expires_at=datetime.now(timezone.utc) + timedelta(days=7),  # 7 gün süre
+            expires_at=datetime.now(UTC) + timedelta(days=7),  # 7 gün süre
             is_used=False
         )
         self.db.add(invitation)

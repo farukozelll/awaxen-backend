@@ -6,7 +6,7 @@ Hybrid Authentication System:
 - Impersonation tokens with proper validation
 - Token type detection and validation
 """
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from jose import JWTError, jwt
