@@ -1,0 +1,326 @@
+services:
+  # ============================================
+  # NGINX (Reverse Proxy)
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: awaxen_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./config/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # BACKEND (Production Image from GitHub Registry)
+  # ============================================
+  backend:
+    # BURAYI KENDİ GITHUB BİLGİLERİNLE DÜZENLE!
+    # Format: ghcr.io/KULLANICI-ADI/REPO-ADI:latest
+    image: ghcr.io/farukozelll/awaxen-backend:latest
+    pull_policy: always
+    container_name: awaxen_backend
+    command: >
+      uvicorn src.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 4
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@db:${DB_PORT}/${DB_NAME}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_CACHE_URL=redis://redis_cache:6379/0
+      - MQTT_BROKER_URL=mqtt
+      - MQTT_BROKER_PORT=1883
+      - MINIO_ENDPOINT=minio:9000
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    volumes:
+      # Kod volume'u kaldırıldı - kod imajın içinde
+      - app_logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # ALEMBIC MIGRATIONS
+  # ============================================
+  migrate:
+    image: ghcr.io/farukozelll/awaxen-backend:latest
+    pull_policy: always
+    container_name: awaxen_migrate
+    command: alembic upgrade head
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - awaxen_network
+    profiles:
+      - migrate
+
+  # ============================================
+  # CELERY WORKER
+  # ============================================
+  worker:
+    image: ghcr.io/farukozelll/awaxen-backend:latest
+    pull_policy: always
+    container_name: awaxen_worker
+    command: celery -A src.worker.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # CELERY BEAT (Scheduler)
+  # ============================================
+  beat:
+    image: ghcr.io/farukozelll/awaxen-backend:latest
+    pull_policy: always
+    container_name: awaxen_beat
+    command: celery -A src.worker.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - worker
+    restart: unless-stopped
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # FLOWER (Celery Monitor)
+  # ============================================
+  flower:
+    image: ghcr.io/farukozelll/awaxen-backend:latest
+    pull_policy: always
+    container_name: awaxen_flower
+    command: celery -A src.worker.celery_app flower --port=5555 --basic_auth=admin:admin
+    env_file:
+      - .env
+    ports:
+      - "5555:5555"
+    depends_on:
+      - worker
+      - redis
+    restart: unless-stopped
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # DATABASE (TimescaleDB)
+  # ============================================
+  db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: awaxen_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_HOST_AUTH_METHOD: "scram-sha-256"
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # PGADMIN (Database Management)
+  # ============================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: awaxen_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # REDIS BROKER (Celery)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: awaxen_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_broker_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # REDIS CACHE (API)
+  # ============================================
+  redis_cache:
+    image: redis:7-alpine
+    container_name: awaxen_redis_cache
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_cache_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # MQTT BROKER (Eclipse Mosquitto)
+  # ============================================
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: awaxen_mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./config/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "test", "-m", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # MINIO (S3 Compatible Storage)
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: awaxen_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # HOME ASSISTANT (IoT Integration)
+  # ============================================
+  homeassistant:
+    image: homeassistant/home-assistant:stable
+    container_name: awaxen_homeassistant
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Istanbul
+    volumes:
+      - ./config/homeassistant:/config
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "8123:8123"
+    depends_on:
+      - mqtt
+    networks:
+      - awaxen_network
+
+  # ============================================
+  # WATCHTOWER (Auto Update)
+  # ============================================
+  watchtower:
+    image: containrrr/watchtower
+    container_name: awaxen_watchtower
+    restart: unless-stopped
+    command: --interval 3600 --cleanup --include-stopped --revive-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_CLEANUP=true
+    networks:
+      - awaxen_network
+
+networks:
+  awaxen_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  db_data:
+  redis_broker_data:
+  redis_cache_data:
+  mqtt_data:
+  mqtt_log:
+  minio_data:
+  pgadmin_data:
+  nginx_logs:
+  app_logs:

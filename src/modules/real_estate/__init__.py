@@ -32,4 +32,4 @@ __all__ = [
 
 from src.modules.real_estate.router import router
 
-__all__.extend(["router"])
+__all__.extend(["models", "router", "schemas", "services"])

@@ -16,6 +16,6 @@ async def socket_io_compatibility():
     )
 
 # Import and include WebSocket endpoint
-from .websocket import websocket_endpoint
+from .websocket import websocket_endpoint  # noqa: E402
 
 router.add_websocket_route("/socket.io/", websocket_endpoint)

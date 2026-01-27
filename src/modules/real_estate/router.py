@@ -118,7 +118,7 @@ async def list_leases(
 ) -> list[LeaseWithAsset]:
     """List leases with optional filters."""
     leases = await service.list_leases(asset_id=asset_id, status=status)
-    return [LeaseWithAsset.model_validate(l) for l in leases]
+    return [LeaseWithAsset.model_validate(lease) for lease in leases]
 
 
 @router.get("/leases/{lease_id}", response_model=LeaseWithAsset)
