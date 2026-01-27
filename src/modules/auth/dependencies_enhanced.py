@@ -212,7 +212,7 @@ async def get_tenant_context_hybrid(
         except Exception:
             # Token verification failed, continue with default org
             pass
-    
+  
     # Try default organization
     if not org_id:
         for membership in current_user.organization_memberships:

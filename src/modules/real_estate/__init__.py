@@ -30,6 +30,4 @@ __all__ = [
     "ZoneType",
 ]
 
-from src.modules.real_estate.router import router
-
-__all__.extend(["models", "router", "schemas", "services"])
+# Router is imported separately in main.py
