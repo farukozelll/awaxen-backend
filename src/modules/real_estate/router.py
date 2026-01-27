@@ -5,7 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Query, status, Depends
 
-from src.modules.auth.dependencies import CurrentUser
+from src.modules.auth.dependencies import CurrentUser, require_permissions
 from src.modules.real_estate.dependencies import RealEstateServiceDep
 from src.modules.real_estate.models import AssetType
 from src.modules.real_estate.schemas import (
@@ -79,6 +79,7 @@ async def get_asset(
     "/assets",
     response_model=AssetResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permissions(["asset:create"]))]
 )
 async def create_asset(
     data: AssetCreate,
@@ -89,7 +90,7 @@ async def create_asset(
     return AssetResponse.model_validate(asset)
 
 
-@router.patch("/assets/{asset_id}", response_model=AssetResponse)
+@router.patch("/assets/{asset_id}", response_model=AssetResponse, dependencies=[Depends(require_permissions(["asset:update"]))])
 async def update_asset(
     asset_id: uuid.UUID,
     data: AssetUpdate,
@@ -100,7 +101,7 @@ async def update_asset(
     return AssetResponse.model_validate(asset)
 
 
-@router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_permissions(["asset:delete"]))])
 async def delete_asset(
     asset_id: uuid.UUID,
     service: RealEstateServiceDep,

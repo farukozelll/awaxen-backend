@@ -6,7 +6,7 @@ Hybrid Authentication System:
 - Impersonation tokens with proper validation
 - Token type detection and validation
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone, UTC
 from typing import Any
 
 from jose import JWTError, jwt
@@ -50,16 +50,16 @@ def create_access_token(
         Encoded JWT token string
     """
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
+        expire = datetime.now(UTC) + timedelta(
             minutes=settings.access_token_expire_minutes
         )
     
     to_encode: dict[str, Any] = {
         "exp": expire,
         "sub": str(subject),
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
         "token_type": token_type,  # Critical: Token type identification
     }
     
@@ -93,7 +93,7 @@ def create_impersonation_token(
     Returns:
         Encoded JWT impersonation token
     """
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
+    expires_at = datetime.now(UTC) + timedelta(minutes=duration_minutes)
     
     extra_claims = {
         "token_type": "impersonation",
@@ -204,7 +204,7 @@ def validate_impersonation_token(payload: dict[str, Any]) -> bool:
     if expires_at_str:
         try:
             expires_at = datetime.fromisoformat(expires_at_str)
-            if datetime.now(timezone.utc) > expires_at:
+            if datetime.now(UTC) > expires_at:
                 logger.warning("Impersonation token expired")
                 return False
         except ValueError:

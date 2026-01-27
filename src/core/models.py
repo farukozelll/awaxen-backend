@@ -4,7 +4,7 @@ All models inherit from this base class.
 Automatically adds id (UUID), created_at, updated_at to all models.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Any
 
 from sqlalchemy import DateTime, MetaData, text
@@ -25,7 +25,7 @@ metadata = MetaData(naming_convention=convention)
 
 def utc_now() -> datetime:
     """Return current UTC datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
