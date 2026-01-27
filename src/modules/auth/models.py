@@ -9,14 +9,14 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.models import Base
 
 if TYPE_CHECKING:
-    from src.modules.real_estate.models import Asset
     from src.modules.billing.models import Wallet
+    from src.modules.real_estate.models import Asset
 
 
 class RoleType(str, Enum):

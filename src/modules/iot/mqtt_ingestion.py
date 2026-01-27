@@ -7,13 +7,12 @@ NEVER perform blocking I/O inside async functions.
 """
 import asyncio
 import uuid
-from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 import aiomqtt
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from src.core.config import settings
 from src.core.logging import get_logger
@@ -224,7 +223,7 @@ class MQTTIngestionService:
             logger.warning("Invalid telemetry payload", error=str(e))
             return
         
-        timestamp = msg.timestamp or datetime.now(timezone.utc)
+        timestamp = msg.timestamp or datetime.now(UTC)
         
         # Note: In production, you'd look up the internal device UUID
         # from the external device_id. For now, we'll skip invalid UUIDs.
@@ -323,7 +322,7 @@ class MQTTIngestionService:
             "device_id": device_id,
             "action": action,
             "parameters": parameters or {},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         
         return await self.publish_command(topic, payload)

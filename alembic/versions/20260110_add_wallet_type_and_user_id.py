@@ -8,17 +8,18 @@ Wallet Türleri:
 - COMPANY: Organizasyon cüzdanı (TL/USD - Fatura ödemeleri)
 - PERSONAL: Kullanıcı cüzdanı (AWX Puan - Ödül/Motivasyon)
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
+
 # revision identifiers, used by Alembic.
 revision: str = '20260110_wallet_type'
-down_revision: Union[str, None] = '20260110_notifications'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = '20260110_notifications'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

@@ -5,9 +5,10 @@ Tenant (organizasyon sahibi) endpoint'leri için ayrı router.
 Bu endpoint'ler sadece kendi organizasyonlarını yönetebilir.
 """
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
 
-from src.modules.auth.dependencies import require_role, AuthServiceDep
+from fastapi import APIRouter, Depends
+
+from src.modules.auth.dependencies import AuthServiceDep, require_role
 from src.modules.auth.schemas import (
     AdminUserListResponse,
     InvitationCreateRequest,

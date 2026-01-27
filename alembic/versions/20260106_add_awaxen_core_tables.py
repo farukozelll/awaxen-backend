@@ -29,16 +29,17 @@ Modified tables:
 - device: add zone_id, external_id, safety_profile, controllable
 - asset: add new asset types
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
+
 revision: str = '20260106_core'
-down_revision: Union[str, None] = '75790e51fe08'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = '75790e51fe08'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

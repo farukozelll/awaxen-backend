@@ -2,7 +2,8 @@
 RealEstate Module - Business Logic Service
 """
 import uuid
-from typing import Sequence
+from collections.abc import Sequence
+from datetime import UTC
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,16 +12,23 @@ from sqlalchemy.orm import selectinload
 from src.core.exceptions import ConflictError, NotFoundError, ValidationError
 from src.core.logging import get_logger
 from src.modules.real_estate.models import (
-    Asset, AssetType, Lease, Zone, AssetMembership, Tenancy, HandoverToken, TenancyStatus
+    Asset,
+    AssetMembership,
+    AssetType,
+    HandoverToken,
+    Lease,
+    Tenancy,
+    TenancyStatus,
+    Zone,
 )
 from src.modules.real_estate.schemas import (
     AssetCreate,
+    AssetMembershipCreate,
     AssetUpdate,
     LeaseCreate,
     LeaseUpdate,
-    ZoneCreate,
     TenancyCreate,
-    AssetMembershipCreate,
+    ZoneCreate,
 )
 
 logger = get_logger(__name__)
@@ -350,7 +358,7 @@ class RealEstateService:
     
     async def revoke_membership(self, membership_id: uuid.UUID) -> AssetMembership:
         """Revoke an asset membership."""
-        from datetime import datetime, timezone
+        from datetime import datetime
         
         stmt = select(AssetMembership).where(AssetMembership.id == membership_id)
         result = await self.db.execute(stmt)
@@ -359,7 +367,7 @@ class RealEstateService:
         if not membership:
             raise NotFoundError("AssetMembership", membership_id)
         
-        membership.revoked_at = datetime.now(timezone.utc)
+        membership.revoked_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(membership)
         return membership
@@ -417,7 +425,7 @@ class RealEstateService:
     
     async def end_tenancy(self, tenancy_id: uuid.UUID) -> Tenancy:
         """End a tenancy."""
-        from datetime import datetime, timezone
+        from datetime import datetime
         
         stmt = select(Tenancy).where(Tenancy.id == tenancy_id)
         result = await self.db.execute(stmt)
@@ -427,7 +435,7 @@ class RealEstateService:
             raise NotFoundError("Tenancy", tenancy_id)
         
         tenancy.status = TenancyStatus.ENDED.value
-        tenancy.end_at = datetime.now(timezone.utc)
+        tenancy.end_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(tenancy)
         
@@ -441,14 +449,14 @@ class RealEstateService:
     ) -> HandoverToken:
         """Create a handover token for tenant transition."""
         import secrets
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
         
         asset = await self.get_asset_by_id(asset_id)
         if not asset:
             raise NotFoundError("Asset", asset_id)
         
         token = secrets.token_urlsafe(32)
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+        expires_at = datetime.now(UTC) + timedelta(hours=expires_in_hours)
         
         handover = HandoverToken(
             asset_id=asset_id,
@@ -470,7 +478,7 @@ class RealEstateService:
         self, token: str, user_id: uuid.UUID
     ) -> tuple[HandoverToken, Tenancy]:
         """Claim a handover token and create new tenancy."""
-        from datetime import datetime, timezone
+        from datetime import datetime
         
         stmt = select(HandoverToken).where(HandoverToken.token == token)
         result = await self.db.execute(stmt)
@@ -483,7 +491,7 @@ class RealEstateService:
             raise ValidationError("Handover token is expired or already used")
         
         # Mark token as used
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         handover.used_at = now
         handover.used_by_user_id = user_id
         
@@ -540,8 +548,8 @@ class RealEstateService:
         result = await self.db.execute(stmt)
         memberships = result.scalars().all()
         
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc)
+        from datetime import datetime
+        now = datetime.now(UTC)
         for m in memberships:
             m.revoked_at = now
         

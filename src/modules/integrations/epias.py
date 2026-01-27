@@ -2,7 +2,7 @@
 EPİAŞ (Turkish Energy Market) Integration
 Fetches electricity prices and market data from EPİAŞ Transparency Platform.
 """
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -31,7 +31,7 @@ class EPIASService:
     
     Usage:
         epias = EPIASService()
-        prices = await epias.get_day_ahead_prices(date.today())
+        prices = await epias.get_day_ahead_prices(datetime.now(UTC).date())
     """
     
     def __init__(
@@ -91,13 +91,14 @@ class EPIASService:
             List of hourly prices with timestamp and price in TRY/MWh (cached for 1 hour)
         """
         if target_date is None:
-            target_date = date.today()
+            target_date = datetime.now(UTC).date()
         
         # Redis cache check (1 saat TTL)
         cache_key = f"epias:prices:{self._format_date(target_date)}"
         try:
-            from src.core.redis import get_redis
             import json
+
+            from src.core.redis import get_redis
             redis = await get_redis()
             if redis:
                 cached = await redis.get(cache_key)
@@ -140,8 +141,9 @@ class EPIASService:
             
             # Cache result for 1 hour
             try:
-                from src.core.redis import get_redis
                 import json
+
+                from src.core.redis import get_redis
                 redis = await get_redis()
                 if redis and prices:
                     # Convert Decimal to float for JSON serialization
@@ -170,7 +172,7 @@ class EPIASService:
             Price in TRY/MWh or None if not found
         """
         if target_datetime is None:
-            target_datetime = datetime.now()
+            target_datetime = datetime.now(UTC)
         
         prices = await self.get_day_ahead_prices(target_datetime.date())
         
@@ -332,9 +334,8 @@ class EPIASService:
             return 0
         
         if target_date is None:
-            target_date = date.today()
+            target_date = datetime.now(UTC).date()
         
-        from sqlalchemy.dialects.postgresql import insert
         
         # MarketPrice model should exist in energy module
         # For now, we'll use a simple approach

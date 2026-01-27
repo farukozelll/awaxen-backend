@@ -4,13 +4,12 @@ Hierarchical Asset structure: Site -> Block -> Floor -> Unit (Self-referencing t
 Zone, Tenancy, AssetMembership, and HandoverToken models for property lifecycle management.
 """
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -20,13 +19,13 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID, ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.models import Base, TenantMixin
 
 if TYPE_CHECKING:
-    from src.modules.auth.models import Organization, User
+    from src.modules.auth.models import Organization
     from src.modules.iot.models import Device, Gateway
 
 
@@ -547,6 +546,5 @@ class HandoverToken(Base):
     @property
     def is_valid(self) -> bool:
         """Check if token is still valid (not used and not expired)."""
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return self.used_at is None and self.expires_at > now

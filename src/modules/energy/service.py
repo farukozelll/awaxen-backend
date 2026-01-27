@@ -4,19 +4,19 @@ Energy Module - Service Layer
 Core loop: Price trigger → Recommendation → Approval → Command → Proof → Reward
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.energy.models import (
+    Command,
+    CommandProof,
+    CommandStatus,
     Recommendation,
     RecommendationStatus,
-    Command,
-    CommandStatus,
-    CommandProof,
     RewardLedger,
     Streak,
 )
@@ -160,7 +160,7 @@ class CommandService:
         command = await self.get_by_id(command_id)
         if command:
             command.status = CommandStatus.SENT.value
-            command.sent_at = datetime.now(timezone.utc)
+            command.sent_at = datetime.now(UTC)
             await self.db.commit()
 
     async def mark_acked(self, command_id: UUID) -> None:
@@ -168,7 +168,7 @@ class CommandService:
         command = await self.get_by_id(command_id)
         if command:
             command.status = CommandStatus.ACKED.value
-            command.acked_at = datetime.now(timezone.utc)
+            command.acked_at = datetime.now(UTC)
             await self.db.commit()
 
     async def complete(
@@ -184,7 +184,7 @@ class CommandService:
             return None
 
         command.status = CommandStatus.SUCCESS.value if success else CommandStatus.FAILED.value
-        command.finished_at = datetime.now(timezone.utc)
+        command.finished_at = datetime.now(UTC)
         command.error = error
 
         if success and proof_payload:
@@ -192,7 +192,7 @@ class CommandService:
                 command_id=command_id,
                 proof_type="state_changed",
                 proof_payload=proof_payload,
-                verified_at=datetime.now(timezone.utc),
+                verified_at=datetime.now(UTC),
             )
             self.db.add(proof)
 
@@ -236,7 +236,7 @@ class RewardService:
 
     async def get_balance(self, user_id: UUID) -> dict:
         """Get user's AWX balance."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         
         # Total (non-expired)
         total_result = await self.db.execute(
@@ -303,7 +303,7 @@ class StreakService:
             ).with_for_update()
         )
         streak = result.scalar_one_or_none()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if not streak:
             streak = Streak(

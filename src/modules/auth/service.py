@@ -3,23 +3,31 @@ Auth Module - Business Logic Service
 NEVER put business logic in Routers. Routers only parse requests and call Services.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
+from src.core.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
 from src.core.logging import get_logger
-from src.core.security import get_password_hash, verify_password, create_access_token
+from src.core.security import create_access_token, get_password_hash, verify_password
 from src.modules.auth.models import (
-    Organization, OrganizationUser, OrganizationModule, Role, User, 
-    RoleType, Permission, ROLE_PERMISSIONS, ModuleType, MODULE_PERMISSIONS
+    MODULE_PERMISSIONS,
+    ROLE_PERMISSIONS,
+    Invitation,
+    ModuleType,
+    Organization,
+    OrganizationModule,
+    OrganizationUser,
+    Permission,
+    Role,
+    RoleType,
+    User,
 )
 from src.modules.auth.schemas import (
     AddUserToOrganizationRequest,
     AddUserToOrganizationResponse,
-    AssignModulesRequest,
     AssignPermissionsRequest,
     AssignRoleRequest,
     Auth0SyncRequest,
@@ -53,6 +61,7 @@ from src.modules.auth.schemas import (
     UserCreate,
     UserResponse,
     UserUpdate,
+    UserWalletInfo,
 )
 
 logger = get_logger(__name__)
@@ -83,7 +92,7 @@ class AuthService:
             raise UnauthorizedError("User account is disabled")
         
         # Update last login
-        user.last_login = datetime.now(timezone.utc)
+        user.last_login = datetime.now(UTC)
         await self.db.commit()
         
         # Get default organization
@@ -179,7 +188,7 @@ class AuthService:
             organization_id=org.id,
             role_id=tenant_role.id,
             is_default=True,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(UTC),
         )
         self.db.add(membership)
         
@@ -202,7 +211,7 @@ class AuthService:
             ModuleType.NOTIFICATIONS.value,
         ]
         
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         
         for module_code in default_modules:
             org_module = OrganizationModule(
@@ -357,7 +366,7 @@ class AuthService:
             organization_id=org.id,
             role_id=tenant_role.id,
             is_default=True,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(UTC),
         )
         self.db.add(membership)
         
@@ -478,7 +487,7 @@ class AuthService:
     
     async def get_user_by_auth0_id(self, auth0_id: str) -> User | None:
         """Get user by Auth0 ID with all relationships loaded."""
-        from src.modules.auth.models import OrganizationUser, Role
+        from src.modules.auth.models import OrganizationUser
         stmt = (
             select(User)
             .options(
@@ -503,7 +512,6 @@ class AuthService:
         3. Davetiye varsa, kullanıcı ilgili organizasyona eklenir
         4. Davetiye yoksa, varsayılan organizasyon oluşturulur
         """
-        from src.modules.auth.models import Invitation
         
         # Mevcut kullanıcıyı kontrol et
         user = await self.get_user_by_auth0_id(request.auth0_id)
@@ -551,7 +559,7 @@ class AuthService:
                 else:
                     # Davetiye yoksa, varsayılan organizasyon oluştur
                     org_name = request.name or request.email.split("@")[0]
-                    org = await self._create_organization_for_user(
+                    await self._create_organization_for_user(
                         user=user,
                         org_name=f"{org_name}'s Organization",
                     )
@@ -578,7 +586,7 @@ class AuthService:
             await self._update_user_role(user, request.role)
         
         # Son giriş zamanını güncelle
-        user.last_login = datetime.now(timezone.utc)
+        user.last_login = datetime.now(UTC)
         
         await self.db.commit()
         
@@ -611,8 +619,8 @@ class AuthService:
             select(Invitation)
             .where(
                 Invitation.email == email,
-                Invitation.is_used == False,
-                Invitation.expires_at > datetime.now(timezone.utc),
+                not Invitation.is_used,
+                Invitation.expires_at > datetime.now(UTC),
             )
         )
         result = await self.db.execute(stmt)
@@ -622,7 +630,6 @@ class AuthService:
         """
         Davetiyeyi tüket ve kullanıcıyı organizasyona ekle.
         """
-        from src.modules.auth.models import Invitation
         
         # Kullanıcıyı organizasyona ekle
         await self._add_user_to_organization(
@@ -633,7 +640,7 @@ class AuthService:
         
         # Davetiyeyi tüketildi olarak işaretle
         invitation.is_used = True
-        invitation.used_at = datetime.now(timezone.utc)
+        invitation.used_at = datetime.now(UTC)
         
         logger.info(
             "Invitation consumed",
@@ -671,7 +678,7 @@ class AuthService:
                 organization_id=organization_id,
                 role_id=role.id,
                 is_default=True,
-                joined_at=datetime.now(timezone.utc),
+                joined_at=datetime.now(UTC),
             )
             self.db.add(org_user)
     
@@ -729,7 +736,6 @@ class AuthService:
     
     async def _build_me_response(self, user: User) -> MeResponse:
         """MeResponse oluştur."""
-        from src.modules.auth.schemas import UserWalletInfo
         
         role_info = None
         permissions: list[str] = []
@@ -839,6 +845,7 @@ class AuthService:
         5. In-app bildirim oluşturulur
         """
         import secrets
+
         from src.modules.auth.models import Invitation
         
         # Slug oluştur
@@ -879,7 +886,7 @@ class AuthService:
         await self.db.flush()
         
         # ===== 2. Modülleri ata (Atomic) =====
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for module_code in request.modules:
             org_module = OrganizationModule(
                 organization_id=org.id,
@@ -931,7 +938,11 @@ class AuthService:
         
         # ===== 6. In-app bildirim oluştur =====
         try:
-            from src.modules.notifications.models import Notification, NotificationType, NotificationPriority
+            from src.modules.notifications.models import (
+                Notification,
+                NotificationPriority,
+                NotificationType,
+            )
             
             welcome_notification = Notification(
                 user_id=user.id,
@@ -1036,7 +1047,7 @@ class AuthService:
                 organization_id=request.organization_id,
                 role_id=role.id,
                 is_default=False,
-                joined_at=datetime.now(timezone.utc),
+                joined_at=datetime.now(UTC),
             )
             self.db.add(membership)
         
@@ -1239,7 +1250,7 @@ class AuthService:
         modules_to_add.add(ModuleType.CORE.value)
         
         # Modülleri ekle
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for module_code in modules_to_add:
             # Modül kodu geçerli mi kontrol et
             if module_code not in [m.value for m in ModuleType]:
@@ -1340,7 +1351,7 @@ class AuthService:
             organization_id=org.id,
             role_id=role.id,
             is_default=not existing_user,  # Yeni kullanıcı için varsayılan org
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(UTC),
         )
         self.db.add(membership)
         
@@ -1440,7 +1451,7 @@ class AuthService:
         """Organizasyonun aktif modüllerini döner."""
         stmt = select(OrganizationModule).where(
             OrganizationModule.organization_id == organization_id,
-            OrganizationModule.is_active == True,
+            OrganizationModule.is_active,
         )
         result = await self.db.execute(stmt)
         modules = result.scalars().all()
@@ -1458,7 +1469,11 @@ class AuthService:
     ):
         """Tüm organizasyonları listele (Admin için)."""
         from sqlalchemy import func
-        from src.modules.auth.schemas import AdminOrganizationListItem, AdminOrganizationListResponse
+
+        from src.modules.auth.schemas import (
+            AdminOrganizationListItem,
+            AdminOrganizationListResponse,
+        )
         
         # Base query
         stmt = select(Organization)
@@ -1601,7 +1616,13 @@ class AuthService:
     ):
         """Tüm kullanıcıları listele (Admin için)."""
         from sqlalchemy import func
-        from src.modules.auth.schemas import AdminUserListItem, AdminUserListResponse, RoleInfo, OrganizationResponse
+
+        from src.modules.auth.schemas import (
+            AdminUserListItem,
+            AdminUserListResponse,
+            OrganizationResponse,
+            RoleInfo,
+        )
         
         # Base query with eager loading
         stmt = (
@@ -1685,7 +1706,13 @@ class AuthService:
     ):
         """Organizasyondaki kullanıcıları listele."""
         from sqlalchemy import func
-        from src.modules.auth.schemas import AdminUserListItem, AdminUserListResponse, RoleInfo, OrganizationResponse
+
+        from src.modules.auth.schemas import (
+            AdminUserListItem,
+            AdminUserListResponse,
+            OrganizationResponse,
+            RoleInfo,
+        )
         
         # Base query - sadece belirtilen organizasyondaki kullanıcılar
         # PERFORMANCE: Sadece ilgili organizasyon membership'ını yükle
@@ -1780,9 +1807,9 @@ class AuthService:
     
     async def get_organization_stats(self, organization_id: str):
         """Organizasyon istatistiklerini getir (wallet bilgileri dahil)."""
-        from sqlalchemy import func
         from datetime import datetime, timedelta
-        from decimal import Decimal
+
+        from sqlalchemy import func
         
         # UUID kontrolü
         try:
@@ -1807,7 +1834,7 @@ class AuthService:
             .join(OrganizationUser)
             .where(
                 OrganizationUser.organization_id == org_uuid,
-                User.is_active == True
+                User.is_active
             )
         )
         
@@ -1821,7 +1848,7 @@ class AuthService:
         )
         
         # Son 30 gün aktivite
-        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
         recent_activity_stmt = (
             select(func.count(User.id))
             .join(OrganizationUser)
@@ -1886,8 +1913,8 @@ class AuthService:
     
     async def _get_organization_wallet_summary(self, org_uuid: uuid.UUID) -> dict:
         """Organizasyonun COMPANY wallet özetini getir."""
-        from sqlalchemy import func
         from decimal import Decimal
+
         from src.modules.auth.schemas import OrganizationWalletSummary
         
         try:
@@ -2010,7 +2037,7 @@ class AuthService:
             raise NotFoundError("Organization", org_id)
         
         org.status = "suspended"
-        org.suspended_at = datetime.now(timezone.utc)
+        org.suspended_at = datetime.now(UTC)
         org.suspended_reason = reason
         org.is_active = False
         
@@ -2112,7 +2139,7 @@ class AuthService:
                 organization_id=org_id,
                 role_id=tenant_role.id,
                 is_default=True,
-                joined_at=datetime.now(timezone.utc),
+                joined_at=datetime.now(UTC),
             )
             self.db.add(new_membership)
         
@@ -2206,7 +2233,13 @@ class AuthService:
         Müşteri desteği için tüm sistemdeki kullanıcıları arayabilme.
         """
         from sqlalchemy import func, or_
-        from src.modules.auth.schemas import AdminUserListResponse, AdminUserListItem, RoleInfo, OrganizationResponse
+
+        from src.modules.auth.schemas import (
+            AdminUserListItem,
+            AdminUserListResponse,
+            OrganizationResponse,
+            RoleInfo,
+        )
         
         # Base query
         base_query = select(User)
@@ -2334,19 +2367,22 @@ class AuthService:
         - Deneme süresi ayarla
         - Modül ayarlarını güncelle
         """
-        from src.modules.auth.schemas import OrganizationModulesUpdateResponse, OrganizationModuleResponse
+        from src.modules.auth.schemas import (
+            OrganizationModuleResponse,
+            OrganizationModulesUpdateResponse,
+        )
         
         org = await self.get_organization_by_id(org_id)
         if not org:
             raise NotFoundError("Organization", org_id)
         
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         updated_modules = []
         
         for module_data in modules:
             module_code = module_data.get("module_code")
             is_active = module_data.get("is_active", True)
-            trial_ends_at = module_data.get("trial_ends_at")
+            module_data.get("trial_ends_at")
             settings = module_data.get("settings")
             
             # Modül kodu geçerli mi kontrol et
@@ -2426,9 +2462,10 @@ class AuthService:
         - Token süresi sınırlı (varsayılan 60 dakika, max 8 saat)
         - Token'da impersonation flag'i var
         """
-        from src.modules.auth.schemas import ImpersonateUserResponse, UserResponse
-        from src.core.security import create_access_token
         from datetime import timedelta
+
+        from src.core.security import create_access_token
+        from src.modules.auth.schemas import ImpersonateUserResponse, UserResponse
         
         target_user = await self.get_user_by_id(target_user_id)
         if not target_user:
@@ -2452,7 +2489,7 @@ class AuthService:
         
         # Create impersonation token with special claims
         expires_delta = timedelta(minutes=duration_minutes)
-        expires_at = datetime.now(timezone.utc) + expires_delta
+        expires_at = datetime.now(UTC) + expires_delta
         
         token = create_access_token(
             subject=str(target_user.id),
@@ -2509,7 +2546,6 @@ class AuthService:
             raise NotFoundError("Organization", org_id)
         
         org_name = org.name
-        org_slug = org.slug
         
         if hard_delete:
             # Hard delete - CASCADE ile tüm ilişkili veriler silinir
@@ -2672,7 +2708,7 @@ class AuthService:
                     logger.info("Auth0 Management API not configured, skipping")
             except Exception as e:
                 logger.warning(f"Auth0 session revocation failed: {e}")
-                revoke_results["auth0_status"] = f"error: {str(e)}"
+                revoke_results["auth0_status"] = f"error: {e!s}"
         
         logger.warning(
             "User sessions revoked (enhanced)",
@@ -2797,6 +2833,7 @@ class AuthService:
         3. Aynı email için aktif davetiye varsa hata ver
         """
         import secrets
+
         from src.modules.auth.models import Invitation
         
         # Organizasyonu kontrol et
@@ -2806,21 +2843,20 @@ class AuthService:
         
         # Davet eden kişi organizasyonun üyesi mi?
         is_member = False
-        is_tenant = False
         for membership in invited_by.organization_memberships:
             if membership.organization_id == organization_id:
                 is_member = True
                 if membership.role and membership.role.code == "tenant":
-                    is_tenant = True
+                    pass
                 break
         
         if not is_member:
-            raise PermissionDeniedError("Bu organizasyona davet gönderme yetkiniz yok")
+            raise ForbiddenError("Bu organizasyona davet gönderme yetkiniz yok")
         
         # Rol kontrolü - tenant sadece user/device atayabilir
         allowed_roles = ["user", "device"]
         if role_code not in allowed_roles:
-            raise PermissionDeniedError(f"Tenant sadece şu rolleri atayabilir: {allowed_roles}")
+            raise ForbiddenError(f"Tenant sadece şu rolleri atayabilir: {allowed_roles}")
         
         # Aynı email için aktif davetiye var mı?
         existing = await self._get_pending_invitations(email)
@@ -2841,7 +2877,7 @@ class AuthService:
             role_code=role_code,
             invited_by_id=invited_by.id,
             message=message,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_hours),
+            expires_at=datetime.now(UTC) + timedelta(hours=expires_hours),
         )
         self.db.add(invitation)
         await self.db.commit()
@@ -2895,8 +2931,8 @@ class AuthService:
         
         if not include_used:
             stmt = stmt.where(
-                Invitation.is_used == False,
-                Invitation.expires_at > datetime.now(timezone.utc),
+                not Invitation.is_used,
+                Invitation.expires_at > datetime.now(UTC),
             )
         
         result = await self.db.execute(stmt)
@@ -2930,7 +2966,7 @@ class AuthService:
                 "message": "Bu davetiye zaten kullanılmış",
             }
         
-        if invitation.expires_at < datetime.now(timezone.utc):
+        if invitation.expires_at < datetime.now(UTC):
             return {
                 "valid": False,
                 "message": "Bu davetiyenin süresi dolmuş",
@@ -2969,7 +3005,7 @@ class AuthService:
                 break
         
         if not is_authorized:
-            raise PermissionDeniedError("Bu davetiyeyi iptal etme yetkiniz yok")
+            raise ForbiddenError("Bu davetiyeyi iptal etme yetkiniz yok")
         
         # Davetiyeyi sil
         await self.db.delete(invitation)

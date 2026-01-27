@@ -11,9 +11,10 @@ Test Kategorileri:
 4. Cascade Delete
 5. Unique Constraints
 """
+import asyncio
+
 import pytest
 from httpx import AsyncClient
-import asyncio
 
 
 class TestDataIntegrity:
@@ -81,7 +82,7 @@ class TestUniqueConstraints:
         }
         resp1 = await client.post("/api/v1/auth/sync", json=user1)
         assert resp1.status_code == 200
-        user1_id = resp1.json()["user"]["id"]
+        resp1.json()["user"]["id"]
         
         # İkinci sync - aynı email, farklı auth0_id
         # Bu durumda sistem ne yapmalı?
@@ -255,10 +256,7 @@ class TestBusinessLogic:
         # Rol kontrolü
         if "role" in data["user"] and data["user"]["role"]:
             role = data["user"]["role"]
-            if isinstance(role, dict):
-                role_code = role.get("code", "")
-            else:
-                role_code = role
+            role_code = role.get("code", "") if isinstance(role, dict) else role
             
             assert role_code == "tenant", \
                 f"Organizasyon sahibi 'tenant' rolüne sahip olmalı, got: {role_code}"

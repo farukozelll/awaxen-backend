@@ -3,17 +3,22 @@ IoT Module - Business Logic Service
 Includes batch insert strategy for telemetry data.
 """
 import uuid
-from datetime import datetime, timezone
-from typing import Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError, NotFoundError, ValidationError
 from src.core.logging import get_logger
 from src.modules.iot.models import (
-    Device, DeviceStatus, Gateway, GatewayPairingCode, GatewayStatus, TelemetryData
+    Device,
+    DeviceStatus,
+    Gateway,
+    GatewayPairingCode,
+    GatewayStatus,
+    TelemetryData,
 )
 from src.modules.iot.schemas import (
     BulkDeviceSetupRequest,
@@ -145,7 +150,7 @@ class IoTService:
             raise NotFoundError("Gateway", gateway_id)
         
         gateway.status = status
-        gateway.last_seen_at = datetime.now(timezone.utc)
+        gateway.last_seen_at = datetime.now(UTC)
         
         await self.db.commit()
         await self.db.refresh(gateway)
@@ -264,7 +269,7 @@ class IoTService:
             raise NotFoundError("Device", device_id)
         
         device.status = status
-        device.last_seen_at = datetime.now(timezone.utc)
+        device.last_seen_at = datetime.now(UTC)
         
         await self.db.commit()
         await self.db.refresh(device)
@@ -315,7 +320,7 @@ class IoTService:
         
         # Pairing kodu oluştur (6 karakter, büyük harf + rakam)
         code = ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(6))
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        expires_at = datetime.now(UTC) + timedelta(minutes=15)
         
         # Mevcut aktif kodları iptal et
         stmt = select(GatewayPairingCode).where(
@@ -325,7 +330,7 @@ class IoTService:
         result = await self.db.execute(stmt)
         old_codes = result.scalars().all()
         for old_code in old_codes:
-            old_code.expires_at = datetime.now(timezone.utc)
+            old_code.expires_at = datetime.now(UTC)
         
         # Yeni kod oluştur
         pairing_code = GatewayPairingCode(
@@ -368,7 +373,7 @@ class IoTService:
             raise NotFoundError("Pairing code", request.pairing_code)
         
         # Kod geçerli mi kontrol et
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if pairing.used_at is not None:
             raise ValidationError("Pairing code already used")
         if pairing.expires_at < now:
@@ -416,8 +421,9 @@ class IoTService:
     async def _get_discovered_devices(self, gateway_id: str) -> list[dict]:
         """Get discovered devices from Redis cache."""
         try:
-            from src.core.redis import get_redis
             import json
+
+            from src.core.redis import get_redis
             redis = await get_redis()
             if redis:
                 cache_key = f"{self.DISCOVERY_CACHE_PREFIX}{gateway_id}"
@@ -431,8 +437,9 @@ class IoTService:
     async def _set_discovered_devices(self, gateway_id: str, devices: list[dict]) -> None:
         """Store discovered devices in Redis cache."""
         try:
-            from src.core.redis import get_redis
             import json
+
+            from src.core.redis import get_redis
             redis = await get_redis()
             if redis:
                 cache_key = f"{self.DISCOVERY_CACHE_PREFIX}{gateway_id}"
@@ -509,7 +516,7 @@ class IoTService:
             safety_profile=request.safety_profile,
             controllable=request.controllable,
             status=DeviceStatus.ONLINE,
-            last_seen_at=datetime.now(timezone.utc),
+            last_seen_at=datetime.now(UTC),
         )
         self.db.add(device)
         await self.db.commit()

@@ -2,7 +2,6 @@
 Integrations API Router
 Endpoints for external service integrations (EPİAŞ, Weather, Telegram).
 """
-from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status

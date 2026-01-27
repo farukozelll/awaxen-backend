@@ -13,19 +13,18 @@ Kullanım:
 """
 import asyncio
 import uuid
-from datetime import datetime, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.main import app
 from src.core.database import get_db
 from src.core.models import Base
 from src.core.security import create_access_token
-
+from src.main import app
 
 # =============================================================================
 # TEST DATABASE CONFIGURATION
@@ -219,7 +218,7 @@ def make_user():
             "full_name": full_name,
             "role": role,
             "is_active": is_active,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
     return _make_user
 
@@ -245,7 +244,7 @@ def make_organization():
             "slug": slug,
             "tier": tier,
             "is_active": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
     return _make_organization
 

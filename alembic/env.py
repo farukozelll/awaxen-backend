@@ -12,26 +12,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-
 from src.core.config import settings
 from src.core.models import Base
 
 # Import all models to ensure they are registered with Base.metadata
-from src.modules.auth.models import Organization, OrganizationUser, Role, User
-from src.modules.real_estate.models import (
-    Asset, Lease, Zone, AssetMembership, Tenancy, HandoverToken
-)
-from src.modules.iot.models import (
-    Device, Gateway, TelemetryData, GatewayPairingCode, DeviceAlias, DeviceStateEvent
-)
-from src.modules.billing.models import Wallet
-from src.modules.notifications.models import (
-    Notification, UserFCMToken, NotificationPreference
-)
-from src.modules.compliance.models import Consent, AuditLog
-from src.modules.energy.models import (
-    Recommendation, Command, CommandProof, RewardLedger, Streak
-)
 
 # Alembic Config object
 config = context.config

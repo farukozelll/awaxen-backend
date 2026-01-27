@@ -13,7 +13,7 @@ async def wait_for_db() -> None:
         attempt += 1
         try:
             conn = await asyncpg.connect(DATABASE_URL.replace("+asyncpg", ""))
-        except Exception:  # noqa: BLE001
+        except Exception:
             await asyncio.sleep(1)
         else:
             await conn.close()

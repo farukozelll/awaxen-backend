@@ -3,13 +3,13 @@ Compliance Module - Service Layer
 """
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.modules.compliance.models import Consent, AuditLog
+from src.modules.compliance.models import AuditLog, Consent
 
 
 class ConsentService:
@@ -53,7 +53,7 @@ class ConsentService:
         metadata: dict | None = None,
     ) -> Consent:
         """Accept a consent."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         
         consent = Consent(
             user_id=user_id,
@@ -73,7 +73,7 @@ class ConsentService:
         """Revoke an active consent."""
         consent = await self.get_active_consent(user_id, consent_type)
         if consent:
-            consent.revoked_at = datetime.now(timezone.utc)
+            consent.revoked_at = datetime.now(UTC)
             await self.db.commit()
             await self.db.refresh(consent)
         return consent
@@ -145,7 +145,6 @@ class AuditLogService:
         page_size: int = 50,
     ) -> tuple[list[AuditLog], int]:
         """Get audit logs with filtering and pagination."""
-        from datetime import datetime
         
         query = select(AuditLog)
         count_query = select(func.count(AuditLog.id))

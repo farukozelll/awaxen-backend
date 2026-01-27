@@ -2,12 +2,13 @@
 Integration Background Tasks
 Scheduled tasks for external service integrations.
 """
-from datetime import date
+
+from datetime import UTC, datetime
 
 import httpx
 
-from src.worker import celery_app
 from src.core.logging import get_logger
+from src.worker import celery_app
 
 logger = get_logger(__name__)
 
@@ -28,24 +29,25 @@ def fetch_daily_prices() -> dict:
     Energy modülü bu verileri kullanarak öneri oluşturur.
     """
     import asyncio
-    from src.modules.integrations.epias import get_epias_service
+
     from src.core.database import async_session_maker
+    from src.modules.integrations.epias import get_epias_service
     
     async def _fetch():
         service = get_epias_service()
-        prices = await service.get_day_ahead_prices(date.today())
-        avg = await service.get_average_price(date.today())
+        prices = await service.get_day_ahead_prices(datetime.now(UTC).date())
+        avg = await service.get_average_price(datetime.now(UTC).date())
         
         # KRITIK: Fiyatları veritabanına kaydet (Energy modülü için)
         saved_count = 0
         if prices:
             async with async_session_maker() as session:
-                saved_count = await service.save_prices_to_db(session, prices, date.today())
+                saved_count = await service.save_prices_to_db(session, prices, datetime.now(UTC).date())
                 await session.commit()
         
         logger.info(
             "Daily prices fetched and saved",
-            date=date.today().isoformat(),
+            date=datetime.now(UTC).date().isoformat(),
             price_count=len(prices),
             saved_count=saved_count,
             average=float(avg) if avg else None,
@@ -53,7 +55,7 @@ def fetch_daily_prices() -> dict:
         
         return {
             "status": "completed",
-            "date": date.today().isoformat(),
+            "date": datetime.now(UTC).date().isoformat(),
             "price_count": len(prices),
             "saved_count": saved_count,
             "average_price": float(avg) if avg else None,
@@ -73,8 +75,9 @@ def send_daily_report(chat_id: str) -> dict:
     Send daily energy report via Telegram.
     """
     import asyncio
-    from src.modules.integrations.telegram import get_telegram_service
+
     from src.modules.integrations.epias import get_epias_service
+    from src.modules.integrations.telegram import get_telegram_service
     
     async def _send():
         telegram = get_telegram_service()
@@ -83,14 +86,14 @@ def send_daily_report(chat_id: str) -> dict:
         if not telegram.is_configured:
             return {"status": "skipped", "reason": "Telegram not configured"}
         
-        avg_price = await epias.get_average_price(date.today())
+        avg_price = await epias.get_average_price(datetime.now(UTC).date())
         
         await telegram.send_message(
             chat_id=chat_id,
             text=f"""
 📊 <b>Günlük Enerji Raporu</b>
 
-<b>Tarih:</b> {date.today().isoformat()}
+<b>Tarih:</b> {datetime.now(UTC).date().isoformat()}
 <b>Ortalama Elektrik Fiyatı:</b> {float(avg_price):.2f} TRY/MWh
 
 <i>Awaxen Energy Platform</i>
@@ -119,6 +122,7 @@ def send_telegram_alert(
     Send alert notification via Telegram with rate limiting.
     """
     import asyncio
+
     from src.modules.integrations.telegram import get_telegram_service
     
     async def _send():
@@ -155,6 +159,7 @@ def check_price_threshold(
     NOT: Fiyat önce Redis cache'ten okunur, yoksa API'ye gider.
     """
     import asyncio
+
     from src.modules.integrations.epias import get_epias_service
     from src.modules.integrations.telegram import get_telegram_service
     

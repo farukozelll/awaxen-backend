@@ -12,46 +12,27 @@ Rol Hiyerarşisi:
 3. user   - Normal kullanıcı (salt okunur)
 4. device - Cihaz/Telemetri erişimi
 """
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 
 from src.modules.auth.dependencies import (
     AuthServiceDep,
     CurrentActiveUser,
     CurrentUser,
-    require_role,
 )
 from src.modules.auth.schemas import (
-    AddUserToOrganizationRequest,
-    AddUserToOrganizationResponse,
-    AdminOrganizationDetailResponse,
-    AdminOrganizationListResponse,
-    AdminRoleListResponse,
-    AdminUserListResponse,
-    AssignRoleToUserRequest,
-    AssignRoleToUserResponse,
     Auth0SyncRequest,
     Auth0SyncResponse,
     AvailableModulesResponse,
     AvailablePermissionsResponse,
     AvailableRolesResponse,
-    CreateOrganizationStep2Request,
-    CreateOrganizationStep2Response,
-    CreateOrganizationWithUserRequest,
-    CreateOrganizationWithUserResponse,
-    InvitationCreateRequest,
-    InvitationListResponse,
-    InvitationResponse,
     InvitationValidateResponse,
     MeResponse,
     OnboardingRequest,
     OnboardingResponse,
-    OrganizationModulesUpdate,
     ProfileUpdateRequest,
     ProfileUpdateResponse,
 )
-
 
 # Auth0 Rol Eşleşmesi
 AUTH0_ROLE_MAPPING = {

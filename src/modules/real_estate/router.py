@@ -3,7 +3,7 @@ RealEstate Module - API Router
 """
 import uuid
 
-from fastapi import APIRouter, Query, status, Depends
+from fastapi import APIRouter, Depends, Query, status
 
 from src.modules.auth.dependencies import CurrentUser, require_permissions
 from src.modules.real_estate.dependencies import RealEstateServiceDep
@@ -13,21 +13,19 @@ from src.modules.real_estate.schemas import (
     AssetHierarchy,
     AssetResponse,
     AssetUpdate,
+    HandoverClaim,
+    HandoverTokenCreate,
+    HandoverTokenResponse,
     LeaseCreate,
     LeaseResponse,
     LeaseUpdate,
     LeaseWithAsset,
-    ZoneCreate,
-    ZoneResponse,
-    ZoneListResponse,
-    AssetMembershipCreate,
-    AssetMembershipResponse,
     TenancyCreate,
-    TenancyResponse,
     TenancyListResponse,
-    HandoverTokenCreate,
-    HandoverTokenResponse,
-    HandoverClaim,
+    TenancyResponse,
+    ZoneCreate,
+    ZoneListResponse,
+    ZoneResponse,
 )
 
 router = APIRouter(prefix="/real-estate", tags=["20. 🏠 Real Estate"])

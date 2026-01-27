@@ -8,9 +8,10 @@ Changes:
 - referral_campaign: Campaign definitions with reward rules
 - referral_conversion: Tracking referrer/referee conversions
 """
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = '20260116_referral'

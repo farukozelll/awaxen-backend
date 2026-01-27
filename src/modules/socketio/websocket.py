@@ -3,10 +3,10 @@ Socket.IO Server Integration
 """
 import asyncio
 import json
-from datetime import datetime, timezone
-from typing import Dict, List
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -16,12 +16,12 @@ router = APIRouter()
 class ConnectionManager:
     """WebSocket connection manager"""
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
-        self.user_connections: Dict[str, str] = {}  # user_id -> connection_id
+        self.active_connections: dict[str, WebSocket] = {}
+        self.user_connections: dict[str, str] = {}  # user_id -> connection_id
     
     async def connect(self, websocket: WebSocket, user_id: str):
         await websocket.accept()
-        connection_id = f"{user_id}_{datetime.now().timestamp()}"
+        connection_id = f"{user_id}_{datetime.now(UTC).timestamp()}"
         self.active_connections[connection_id] = websocket
         self.user_connections[user_id] = connection_id
         logger.info(f"WebSocket connected: {connection_id}")
@@ -58,7 +58,7 @@ async def websocket_endpoint(websocket: WebSocket):
             # Send heartbeat every 30 seconds
             await websocket.send_text(json.dumps({
                 "type": "heartbeat",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }))
             await asyncio.sleep(30)
     except WebSocketDisconnect:

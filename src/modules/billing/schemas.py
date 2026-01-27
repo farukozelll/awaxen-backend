@@ -16,7 +16,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.modules.billing.models import TransactionStatus, TransactionType, WalletType
 
-
 # ============== Wallet Schemas ==============
 
 class WalletBase(BaseModel):

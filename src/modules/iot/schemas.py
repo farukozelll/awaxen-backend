@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.modules.iot.models import DeviceStatus, DeviceType, GatewayStatus
 
-
 # ============== Gateway Schemas ==============
 
 class GatewayBase(BaseModel):

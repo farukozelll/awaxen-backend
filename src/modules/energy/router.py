@@ -1,6 +1,7 @@
 """
 Energy Module - API Routes
 """
+from datetime import UTC
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,7 +11,6 @@ from src.core.database import get_db
 from src.modules.auth.dependencies import get_current_user
 from src.modules.auth.models import User
 from src.modules.energy.schemas import (
-    ApproveRecommendationRequest,
     ApproveRecommendationResponse,
     CommandCreate,
     CommandResponse,
@@ -21,7 +21,6 @@ from src.modules.energy.schemas import (
     EpiasPriceHistoryResponse,
     EpiasPriceResponse,
     RecommendationAction,
-    RecommendationCreate,
     RecommendationListResponse,
     RecommendationResponse,
     RecommendationTriggerRequest,
@@ -35,8 +34,8 @@ from src.modules.energy.schemas import (
     UserStreaksResponse,
 )
 from src.modules.energy.service import (
-    RecommendationService,
     CommandService,
+    RecommendationService,
     RewardService,
     StreakService,
 )
@@ -347,11 +346,12 @@ async def get_current_prices(
     - High price windows (for recommendations)
     - Price threshold for triggering recommendations
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime
     from decimal import Decimal
+
     from src.modules.integrations.epias import get_epias_service
     
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     epias = get_epias_service()
     
     # Get today's prices from EPİAŞ
@@ -439,6 +439,7 @@ async def get_price_history(
 ):
     """Get historical EPİAŞ prices for a time range."""
     from decimal import Decimal
+
     from src.modules.integrations.epias import get_epias_service
     
     epias = get_epias_service()
@@ -450,7 +451,7 @@ async def get_price_history(
     prices = []
     all_prices = []
     
-    for day_data in price_range:
+    for _day_data in price_range:
         # Get detailed hourly prices for each day
         day_prices = await epias.get_day_ahead_prices(
             target_date=request.start_date  # This will be iterated in get_price_range
@@ -502,14 +503,16 @@ async def get_core_loop_status(
     - Pending commands count
     - Today's savings and AWX earned
     """
-    from datetime import datetime, timezone, date
+    from datetime import datetime
     from decimal import Decimal
-    from sqlalchemy import select, func
+
+    from sqlalchemy import func, select
+
+    from src.modules.energy.models import Command, Recommendation, RewardLedger
     from src.modules.integrations.epias import get_epias_service
-    from src.modules.energy.models import Recommendation, Command, RewardLedger
     
-    now = datetime.now(timezone.utc)
-    today = date.today()
+    now = datetime.now(UTC)
+    today = datetime.now(UTC).date()
     epias = get_epias_service()
     
     # Get current EPİAŞ price
@@ -549,7 +552,7 @@ async def get_core_loop_status(
     pending_commands = pending_cmd_result.scalar() or 0
     
     # Calculate today's savings (from completed recommendations)
-    today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
+    today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=UTC)
     savings_stmt = select(func.sum(Recommendation.expected_saving_try)).where(
         Recommendation.asset_id == asset_id,
         Recommendation.status == "approved",
@@ -596,9 +599,11 @@ async def trigger_recommendation(
     
     Use `force=true` to bypass condition checks (for testing).
     """
-    from datetime import datetime, timezone, date
+    from datetime import datetime
     from decimal import Decimal
+
     from sqlalchemy import select
+
     from src.modules.integrations.epias import get_epias_service
     from src.modules.iot.models import Device
     
@@ -614,8 +619,8 @@ async def trigger_recommendation(
     
     if not request.force:
         # 1. Price check - Is current price above threshold?
-        now = datetime.now(timezone.utc)
-        today = date.today()
+        now = datetime.now(UTC)
+        today = datetime.now(UTC).date()
         today_prices = await epias.get_day_ahead_prices(today)
         current_hour = now.hour
         current_price = Decimal("0")
@@ -646,7 +651,7 @@ async def trigger_recommendation(
         # 2. Device availability check - Find controllable device for this asset
         device_stmt = select(Device).where(
             Device.asset_id == request.asset_id,
-            Device.controllable == True,
+            Device.controllable,
             Device.safety_profile != "critical",
             Device.status == "online",
         ).limit(1)
@@ -735,6 +740,7 @@ async def approve_recommendation(
     if recommendation.target_device_id:
         # Get device's gateway from IoT module
         from sqlalchemy import select
+
         from src.modules.iot.models import Device
         
         device_result = await db.execute(

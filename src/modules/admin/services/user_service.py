@@ -8,30 +8,28 @@ Kullanıcı yönetimi işlemleri.
 - Session management
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from src.core.logging import get_logger
 from src.modules.auth.models import (
-    ModuleType,
     Organization,
     OrganizationUser,
     Role,
     User,
 )
 from src.modules.auth.schemas import (
-    AdminUserListResponse,
     AdminUserListItem,
-    AssignRoleToUserRequest,
+    AdminUserListResponse,
     AssignRoleToUserResponse,
     RoleInfo,
     UserResponse,
 )
-from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     pass
@@ -139,7 +137,12 @@ class AdminUserService:
         is_active: bool | None = None,
     ):
         """Organizasyondaki kullanıcıları listele."""
-        from src.modules.auth.schemas import AdminUserListResponse, AdminUserListItem, RoleInfo, OrganizationResponse
+        from src.modules.auth.schemas import (
+            AdminUserListItem,
+            AdminUserListResponse,
+            OrganizationResponse,
+            RoleInfo,
+        )
         
         # Base query - sadece belirtilen organizasyondaki kullanıcılar
         # PERFORMANCE: Sadece ilgili organizasyon membership'ını yükle
@@ -241,7 +244,9 @@ class AdminUserService:
         request,
     ) -> dict:
         """Organizasyona kullanıcı ekle."""
-        from src.modules.auth.schemas import AddUserToOrganizationResponse, OrganizationResponse, UserResponse, RoleResponse
+        from src.modules.auth.schemas import (
+            OrganizationResponse,
+        )
         
         org = await self._get_organization_by_id(request.organization_id)
         if not org:
@@ -280,7 +285,7 @@ class AdminUserService:
             organization_id=org.id,
             role_id=role.id,
             is_default=not existing_user,
-            joined_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(UTC),
         )
         self.db.add(membership)
         
@@ -345,7 +350,7 @@ class AdminUserService:
         if not remaining_memberships:
             # Başka organizasyonu yok, kullanıcıyı pasife çek
             user.is_active = False
-            user.deleted_at = datetime.now(timezone.utc)
+            user.deleted_at = datetime.now(UTC)
         
         await self.db.commit()
         
@@ -408,7 +413,7 @@ class AdminUserService:
             raise NotFoundError("User", user_id)
         
         user.is_active = False
-        user.banned_at = datetime.now(timezone.utc)
+        user.banned_at = datetime.now(UTC)
         user.banned_reason = reason
         
         await self.db.commit()
@@ -535,7 +540,7 @@ class AdminUserService:
         )
         
         # Token bilgisini logla (güvenlik için)
-        from src.core.security_enhanced import verify_token, get_token_info
+        from src.core.security_enhanced import verify_token
         token_info = get_token_info(verify_token(token))
         
         # Audit log
@@ -558,7 +563,7 @@ class AdminUserService:
             "reason": reason,
             "duration_minutes": duration_minutes,
             "token": token,  # Return token for frontend
-            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=duration_minutes),
+            "expires_at": datetime.now(UTC) + timedelta(minutes=duration_minutes),
             "message": f"'{target_user.email}' kullanıcısı olarak taklit başlatıldı",
         }
     

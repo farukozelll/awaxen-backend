@@ -9,9 +9,8 @@ Bu migration:
 2. İlk kullanıcıyı (faruk.ozelll@outlook.com) admin yapar
 3. Sadece 4 rol kalır: admin, tenant, user, device
 """
-from alembic import op
-import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'fix_roles_cleanup'

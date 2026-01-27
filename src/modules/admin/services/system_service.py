@@ -8,26 +8,24 @@ Sistem yönetimi işlemleri.
 - System statistics
 """
 import uuid
+from datetime import UTC
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError, NotFoundError
 from src.core.logging import get_logger
 from src.modules.auth.models import (
-    Permission,
-    Role,
-    ROLE_PERMISSIONS,
     MODULE_PERMISSIONS,
+    ROLE_PERMISSIONS,
+    Role,
 )
 from src.modules.auth.schemas import (
-    AdminRoleListResponse,
     AdminPermissionListResponse,
+    AdminRoleListResponse,
     RoleResponse,
-    RoleInfo,
 )
 
 if TYPE_CHECKING:
@@ -262,14 +260,15 @@ class AdminSystemService:
     async def get_system_stats(self) -> dict:
         """Sistem istatistiklerini getir."""
         from sqlalchemy import func
-        from src.modules.auth.models import User, Organization, Role
+
+        from src.modules.auth.models import Organization, Role, User
         
         # User statistics
         total_users_stmt = select(func.count(User.id))
         total_users_result = await self.db.execute(total_users_stmt)
         total_users = total_users_result.scalar() or 0
         
-        active_users_stmt = select(func.count(User.id)).where(User.is_active == True)
+        active_users_stmt = select(func.count(User.id)).where(User.is_active)
         active_users_result = await self.db.execute(active_users_stmt)
         active_users = active_users_result.scalar() or 0
         
@@ -278,7 +277,7 @@ class AdminSystemService:
         total_orgs_result = await self.db.execute(total_orgs_stmt)
         total_organizations = total_orgs_result.scalar() or 0
         
-        active_orgs_stmt = select(func.count(Organization.id)).where(Organization.is_active == True)
+        active_orgs_stmt = select(func.count(Organization.id)).where(Organization.is_active)
         active_orgs_result = await self.db.execute(active_orgs_stmt)
         active_organizations = active_orgs_result.scalar() or 0
         
@@ -311,12 +310,12 @@ class AdminSystemService:
     
     async def get_system_health(self) -> dict:
         """Sistem sağlık durumu."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
         
         # Recent activity (last 24 hours)
-        one_day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+        one_day_ago = datetime.now(UTC) - timedelta(days=1)
         
-        from src.modules.auth.models import User, Organization
+        from src.modules.auth.models import Organization, User
         
         recent_users_stmt = select(func.count(User.id)).where(User.created_at >= one_day_ago)
         recent_users_result = await self.db.execute(recent_users_stmt)
@@ -328,7 +327,7 @@ class AdminSystemService:
         
         return {
             "status": "healthy",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "recent_activity": {
                 "last_24_hours": {
                     "new_users": recent_users,

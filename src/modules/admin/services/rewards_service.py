@@ -8,23 +8,22 @@ Admin kullanıcıların tüm organizasyonların wallet'larını görmesi için.
 - Admin-level wallet statistics
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import NotFoundError
+from src.core.logging import get_logger
 from src.modules.billing.models import (
     Transaction,
-    TransactionStatus,
     TransactionType,
     Wallet,
     WalletType,
 )
-from src.modules.billing.schemas import WalletResponse, TransactionResponse
-from src.core.logging import get_logger
+from src.modules.billing.schemas import TransactionResponse, WalletResponse
 
 if TYPE_CHECKING:
     pass
@@ -364,7 +363,7 @@ class AdminRewardsService:
         
         # Recent activity (last 7 days)
         from datetime import timedelta
-        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        seven_days_ago = datetime.now(UTC) - timedelta(days=7)
         
         recent_tx_stmt = select(func.count(Transaction.id)).where(
             Transaction.created_at >= seven_days_ago

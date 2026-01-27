@@ -4,6 +4,7 @@ Auth Module - FastAPI Dependencies
 Auth0 JWT token doğrulaması ile kullanıcı kimlik doğrulama.
 Token'daki auth0_id ile veritabanından kullanıcı bulunur.
 """
+import contextlib
 import uuid
 from typing import Annotated
 
@@ -11,7 +12,8 @@ from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.auth0 import Auth0User, get_current_user_auth0, verify_token as verify_auth0_token
+from src.core.auth0 import Auth0User, get_current_user_auth0
+from src.core.auth0 import verify_token as verify_auth0_token
 from src.core.database import get_db
 from src.core.exceptions import ForbiddenError, TenantContextError, UnauthorizedError
 from src.core.logging import get_logger
@@ -145,10 +147,8 @@ async def get_tenant_context(
     if not org_id and credentials:
         payload = verify_token(credentials.credentials)
         if payload and payload.get("org_id"):
-            try:
+            with contextlib.suppress(ValueError):
                 org_id = uuid.UUID(payload["org_id"])
-            except ValueError:
-                pass
     
     # Try default organization
     if not org_id:

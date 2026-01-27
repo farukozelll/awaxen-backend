@@ -10,12 +10,12 @@ from src.core.database import get_db
 from src.modules.auth.dependencies import get_current_user, require_permissions
 from src.modules.auth.models import User
 from src.modules.compliance.schemas import (
+    AuditLogListResponse,
     ConsentAccept,
     ConsentListResponse,
     ConsentResponse,
-    AuditLogListResponse,
 )
-from src.modules.compliance.service import ConsentService, AuditLogService
+from src.modules.compliance.service import AuditLogService, ConsentService
 
 router = APIRouter(prefix="/consents", tags=["52. 📜 Compliance"])
 

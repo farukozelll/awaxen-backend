@@ -9,14 +9,13 @@ Wallet Türleri:
 - PERSONAL: Kullanıcı cüzdanı (AWX Puan - Ödül/Motivasyon)
 """
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Sequence
 from decimal import Decimal
-from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import NotFoundError, ValidationError
+from src.core.exceptions import ConflictError, NotFoundError, ValidationError
 from src.core.logging import get_logger
 from src.modules.billing.models import (
     Transaction,

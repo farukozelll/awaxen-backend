@@ -26,15 +26,14 @@ Kullanım:
 """
 import asyncio
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import resend
-from sqlalchemy import select, func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.logging import get_logger
 from src.core.config import settings
+from src.core.logging import get_logger
 
 # Initialize Resend API
 if settings.resend_api_key:
@@ -42,17 +41,16 @@ if settings.resend_api_key:
 
 from src.modules.notifications.models import (
     Notification,
-    UserFCMToken,
     NotificationPreference,
-    NotificationType,
     NotificationPriority,
+    NotificationType,
+    UserFCMToken,
 )
 from src.modules.notifications.schemas import (
-    NotificationResponse,
-    NotificationListResponse,
-    NotificationCreateRequest,
     FCMTokenRegisterRequest,
+    NotificationListResponse,
     NotificationPreferenceResponse,
+    NotificationResponse,
 )
 
 logger = get_logger(__name__)
@@ -195,7 +193,7 @@ class NotificationService:
         stmt = select(Notification).where(Notification.user_id == user_id)
         
         if unread_only:
-            stmt = stmt.where(Notification.is_read == False)
+            stmt = stmt.where(not Notification.is_read)
         
         # Total count
         count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -204,7 +202,7 @@ class NotificationService:
         # Unread count
         unread_stmt = select(func.count()).where(
             Notification.user_id == user_id,
-            Notification.is_read == False,
+            not Notification.is_read,
         )
         unread_count = await self.db.scalar(unread_stmt) or 0
         
@@ -228,7 +226,7 @@ class NotificationService:
         """Okunmamış bildirim sayısını getir."""
         stmt = select(func.count()).where(
             Notification.user_id == user_id,
-            Notification.is_read == False,
+            not Notification.is_read,
         )
         return await self.db.scalar(stmt) or 0
     
@@ -243,11 +241,11 @@ class NotificationService:
             .where(
                 Notification.user_id == user_id,
                 Notification.id.in_(notification_ids),
-                Notification.is_read == False,
+                not Notification.is_read,
             )
             .values(
                 is_read=True,
-                read_at=datetime.now(timezone.utc),
+                read_at=datetime.now(UTC),
             )
         )
         result = await self.db.execute(stmt)
@@ -260,11 +258,11 @@ class NotificationService:
             update(Notification)
             .where(
                 Notification.user_id == user_id,
-                Notification.is_read == False,
+                not Notification.is_read,
             )
             .values(
                 is_read=True,
-                read_at=datetime.now(timezone.utc),
+                read_at=datetime.now(UTC),
             )
         )
         result = await self.db.execute(stmt)
@@ -315,7 +313,7 @@ class NotificationService:
         """Kullanıcının aktif FCM token'larını getir."""
         stmt = select(UserFCMToken.token).where(
             UserFCMToken.user_id == user_id,
-            UserFCMToken.is_active == True,
+            UserFCMToken.is_active,
         )
         result = await self.db.execute(stmt)
         return [row[0] for row in result.fetchall()]
@@ -394,8 +392,7 @@ class NotificationService:
             return False
         
         try:
-            from datetime import time
-            now = datetime.now(timezone.utc).time()
+            now = datetime.now(UTC).time()
             
             start = datetime.strptime(start_time, "%H:%M").time()
             end = datetime.strptime(end_time, "%H:%M").time()
@@ -714,7 +711,7 @@ class NotificationService:
         
         try:
             # Resend sync API'yi async context'te çalıştır
-            result = await asyncio.to_thread(
+            await asyncio.to_thread(
                 resend.Emails.send,
                 {
                     "from": settings.email_sender,

@@ -9,16 +9,16 @@ Provides realtime updates for:
 """
 import asyncio
 import json
-from datetime import datetime, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
+from src.core.logging import get_logger
 from src.modules.auth.dependencies import get_current_user
 from src.modules.auth.models import User
-from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -45,7 +45,7 @@ async def event_generator(
             # Generate heartbeat every 30 seconds
             event = {
                 "type": "heartbeat",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             
             yield f"data: {json.dumps(event)}\n\n"

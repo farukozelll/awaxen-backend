@@ -1,6 +1,6 @@
 """
 Compliance Module - KVKK/GDPR Consent and Audit Logging.
 """
-from src.modules.compliance.models import Consent, AuditLog
+from src.modules.compliance.models import AuditLog, Consent
 
-__all__ = ["Consent", "AuditLog"]
+__all__ = ["AuditLog", "Consent"]

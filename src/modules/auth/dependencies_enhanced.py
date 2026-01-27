@@ -4,26 +4,25 @@ Enhanced Auth Dependencies - Hybrid Authentication System
 Supports both Auth0 tokens (RS256) and Local tokens (HS256) including impersonation tokens.
 """
 import uuid
-from typing import Annotated, Union
+from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from src.core.auth0 import Auth0User, get_current_user_auth0, verify_token as verify_auth0_token
-from src.core.database import get_db
+from src.core.auth0 import Auth0User, get_current_user_auth0
+from src.core.auth0 import verify_token as verify_auth0_token
 from src.core.exceptions import ForbiddenError, TenantContextError, UnauthorizedError
 from src.core.logging import get_logger
 from src.core.security_enhanced import (
-    verify_token as verify_local_token,
-    verify_token_with_type,
+    get_token_info,
     is_impersonation_token,
     validate_impersonation_token,
-    get_token_info,
+)
+from src.core.security_enhanced import (
+    verify_token as verify_local_token,
 )
 from src.modules.auth.models import User
-from src.modules.auth.service import AuthService
+from src.modules.auth.service import AuthService, get_auth_service
 
 logger = get_logger(__name__)
 

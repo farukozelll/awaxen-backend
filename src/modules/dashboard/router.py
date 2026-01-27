@@ -7,6 +7,7 @@ Endpoint'ler:
 - GET /api/v1/dashboard/summary - Genel özet bilgileri
 - GET /api/v1/dashboard/savings/summary - Tasarruf özeti
 """
+from datetime import UTC
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -14,9 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.modules.auth.dependencies import CurrentUser
-from src.modules.dashboard.schemas import DashboardSummaryResponse, SavingsSummaryResponse, SavingsSummary
+from src.modules.dashboard.schemas import (
+    DashboardSummaryResponse,
+    SavingsSummary,
+    SavingsSummaryResponse,
+)
 from src.modules.dashboard.service import DashboardService
-
 
 router = APIRouter(prefix="/dashboard", tags=["50. 📊 Dashboard"])
 
@@ -210,9 +214,9 @@ async def get_savings_summary(
     period: str = Query(default="all_time", description="Dönem (all_time, monthly, yearly)"),
 ) -> SavingsSummaryResponse:
     """Tasarruf özet bilgilerini döner."""
-    from datetime import datetime, timezone, timedelta
-    from sqlalchemy import select, func
-    from decimal import Decimal
+    from datetime import datetime
+
+    from sqlalchemy import func, select
     
     # Get user's default organization
     org_id = None
@@ -222,13 +226,13 @@ async def get_savings_summary(
             break
     
     # Calculate date range based on period
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if period == "monthly":
-        start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     elif period == "yearly":
-        start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
     else:  # all_time
-        start_date = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        datetime(2020, 1, 1, tzinfo=UTC)
     
     # Calculate savings from approved recommendations
     try:

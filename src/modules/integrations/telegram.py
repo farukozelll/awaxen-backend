@@ -2,7 +2,6 @@
 Telegram Bot Integration
 Sends notifications and alerts via Telegram.
 """
-import asyncio
 from typing import Any
 
 import httpx

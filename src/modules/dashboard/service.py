@@ -1,8 +1,11 @@
 """Dashboard Service - Summary and Analytics."""
+from datetime import UTC
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
+from src.modules.billing.models import Wallet
 from src.modules.dashboard.schemas import (
     AlertSummary,
     DashboardSummaryResponse,
@@ -12,7 +15,6 @@ from src.modules.dashboard.schemas import (
     WalletSummary,
 )
 from src.modules.iot.models import Device, DeviceStatus, Gateway, GatewayStatus
-from src.modules.billing.models import Wallet
 
 logger = get_logger(__name__)
 
@@ -120,15 +122,16 @@ class DashboardService:
     
     async def _get_energy_summary(self, organization_id: str | None) -> EnergySummary:
         """Enerji özeti - telemetri verilerinden hesaplanır."""
-        from datetime import datetime, timezone, timedelta
-        from sqlalchemy import select, func
+        from datetime import datetime
+
+        from sqlalchemy import func, select
         
         try:
             # Import telemetry model
             from src.modules.iot.models import Telemetry
             
             # Get today's date range
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             
             # Base query for organization filter
@@ -215,15 +218,16 @@ class DashboardService:
     
     async def _get_alert_summary(self, organization_id: str | None) -> AlertSummary:
         """Alarm özeti - notification tablosundan hesaplanır."""
-        from datetime import datetime, timezone, timedelta
-        from sqlalchemy import select, func
+        from datetime import datetime, timedelta
+
+        from sqlalchemy import func, select
         
         try:
             # Import notification model for alerts
             from src.modules.notifications.models import Notification
             
             # Get last 24 hours
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             yesterday = now - timedelta(hours=24)
             
             # Base filter

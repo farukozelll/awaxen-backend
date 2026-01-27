@@ -1,10 +1,10 @@
 """
 Telemetry Background Tasks
 """
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from src.worker import celery_app
 from src.core.logging import get_logger
+from src.worker import celery_app
 
 logger = get_logger(__name__)
 
@@ -20,12 +20,14 @@ def cleanup_old_telemetry(days: int = 90) -> dict:
     drop_chunks ise chunk bazlı silme yapar, çok hızlıdır.
     """
     import asyncio
+
     from sqlalchemy import text
+
     from src.core.database import async_session_maker
     
     async def _cleanup():
         async with async_session_maker() as session:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            cutoff = datetime.now(UTC) - timedelta(days=days)
             
             # TimescaleDB drop_chunks kullan (standart DELETE yerine)
             # Bu fonksiyon chunk bazlı silme yapar, çok daha hızlıdır
@@ -66,8 +68,9 @@ def cleanup_old_telemetry(days: int = 90) -> dict:
                 )
                 
                 # Fallback: Batch delete (yine de tek seferde silme)
-                from src.modules.iot.models import TelemetryData
                 from sqlalchemy import delete
+
+                from src.modules.iot.models import TelemetryData
                 
                 stmt = delete(TelemetryData).where(
                     TelemetryData.timestamp < cutoff
@@ -100,9 +103,10 @@ def process_telemetry_batch(readings: list[dict]) -> dict:
     """
     import asyncio
     from decimal import Decimal
+
     from src.core.database import async_session_maker
-    from src.modules.iot.service import TelemetryService
     from src.modules.iot.schemas import TelemetryDataBatch, TelemetryDataCreate
+    from src.modules.iot.service import TelemetryService
     
     async def _process():
         async with async_session_maker() as session:

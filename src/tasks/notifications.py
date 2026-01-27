@@ -1,8 +1,8 @@
 """
 Notification Background Tasks
 """
-from src.worker import celery_app
 from src.core.logging import get_logger
+from src.worker import celery_app
 
 logger = get_logger(__name__)
 

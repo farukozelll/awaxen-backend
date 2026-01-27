@@ -1,12 +1,11 @@
 """
 Model Import Tests - Verify all models can be imported correctly
 """
-import pytest
 
 
 def test_compliance_models_import():
     """Test compliance models can be imported."""
-    from src.modules.compliance.models import Consent, AuditLog, ConsentType
+    from src.modules.compliance.models import AuditLog, Consent, ConsentType
     assert Consent is not None
     assert AuditLog is not None
     assert ConsentType is not None
@@ -15,8 +14,11 @@ def test_compliance_models_import():
 def test_energy_models_import():
     """Test energy models can be imported."""
     from src.modules.energy.models import (
-        Recommendation, Command, CommandProof, RewardLedger, Streak,
-        RecommendationStatus, CommandStatus, CommandAction
+        Command,
+        CommandProof,
+        Recommendation,
+        RewardLedger,
+        Streak,
     )
     assert Recommendation is not None
     assert Command is not None
@@ -28,8 +30,10 @@ def test_energy_models_import():
 def test_marketplace_models_import():
     """Test marketplace models can be imported."""
     from src.modules.marketplace.models import (
-        Alarm, Job, JobOffer, JobProof,
-        AlarmSeverity, JobStatus, JobCategory
+        Alarm,
+        Job,
+        JobOffer,
+        JobProof,
     )
     assert Alarm is not None
     assert Job is not None
@@ -40,8 +44,12 @@ def test_marketplace_models_import():
 def test_real_estate_models_import():
     """Test real estate models can be imported."""
     from src.modules.real_estate.models import (
-        Asset, Zone, Lease, AssetMembership, Tenancy, HandoverToken,
-        AssetType, ZoneType, TenancyStatus
+        Asset,
+        AssetMembership,
+        HandoverToken,
+        Lease,
+        Tenancy,
+        Zone,
     )
     assert Asset is not None
     assert Zone is not None
@@ -54,9 +62,12 @@ def test_real_estate_models_import():
 def test_iot_models_import():
     """Test IoT models can be imported."""
     from src.modules.iot.models import (
-        Gateway, Device, TelemetryData,
-        GatewayPairingCode, DeviceAlias, DeviceStateEvent,
-        SafetyProfile, DeviceStatus, GatewayStatus
+        Device,
+        DeviceAlias,
+        DeviceStateEvent,
+        Gateway,
+        GatewayPairingCode,
+        TelemetryData,
     )
     assert Gateway is not None
     assert Device is not None
@@ -68,7 +79,7 @@ def test_iot_models_import():
 
 def test_auth_models_import():
     """Test auth models can be imported."""
-    from src.modules.auth.models import User, Organization, Role, OrganizationUser
+    from src.modules.auth.models import Organization, OrganizationUser, Role, User
     assert User is not None
     assert Organization is not None
     assert Role is not None
@@ -77,7 +88,7 @@ def test_auth_models_import():
 
 def test_billing_models_import():
     """Test billing models can be imported."""
-    from src.modules.billing.models import Wallet, Transaction, Invoice
+    from src.modules.billing.models import Invoice, Transaction, Wallet
     assert Wallet is not None
     assert Transaction is not None
     assert Invoice is not None
@@ -85,9 +96,7 @@ def test_billing_models_import():
 
 def test_notifications_models_import():
     """Test notifications models can be imported."""
-    from src.modules.notifications.models import (
-        Notification, UserFCMToken, NotificationPreference
-    )
+    from src.modules.notifications.models import Notification, NotificationPreference, UserFCMToken
     assert Notification is not None
     assert UserFCMToken is not None
     assert NotificationPreference is not None

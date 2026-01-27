@@ -7,15 +7,15 @@ Swagger'da "Bu alana ne yazacağım?" sorusu kalmasın.
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.modules.real_estate.models import (
-    AssetStatus, AssetType, LeaseStatus, ZoneType,
-    AssetMembershipRelation, TenancyStatus,
+    AssetStatus,
+    AssetType,
+    LeaseStatus,
+    ZoneType,
 )
-
 
 # ============== Asset Schemas ==============
 

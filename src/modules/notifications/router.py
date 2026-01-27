@@ -24,17 +24,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.modules.auth.dependencies import CurrentUser
 from src.modules.notifications.schemas import (
-    NotificationListResponse,
-    NotificationMarkReadRequest,
-    NotificationResponse,
     FCMTokenRegisterRequest,
     FCMTokenResponse,
+    NotificationListResponse,
+    NotificationMarkReadRequest,
     NotificationPreferenceResponse,
     NotificationPreferenceUpdateRequest,
     TelegramLinkResponse,
 )
 from src.modules.notifications.service import NotificationService
-
 
 router = APIRouter(prefix="/notifications", tags=["51. 🔔 Notifications"])
 

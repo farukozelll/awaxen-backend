@@ -7,7 +7,7 @@ Run the following SQL after table creation:
     SELECT create_hypertable('telemetry_data', 'timestamp');
 """
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -28,7 +28,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.core.models import Base, TenantMixin
 
 if TYPE_CHECKING:
-    from src.modules.real_estate.models import Asset, Zone
+    from src.modules.real_estate.models import Asset
 
 
 class SafetyProfile(str, Enum):
@@ -563,8 +563,7 @@ class GatewayPairingCode(Base):
     @property
     def is_valid(self) -> bool:
         """Check if code is still valid."""
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         return self.used_at is None and self.expires_at > now
 
 

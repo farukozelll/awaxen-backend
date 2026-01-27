@@ -2,7 +2,7 @@
 Simple Socket.IO Compatibility Layer
 Redirects Socket.IO requests to SSE
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
 router = APIRouter()
@@ -17,4 +17,5 @@ async def socket_io_compatibility():
 
 # Import and include WebSocket endpoint
 from .websocket import websocket_endpoint
+
 router.add_websocket_route("/socket.io/", websocket_endpoint)
