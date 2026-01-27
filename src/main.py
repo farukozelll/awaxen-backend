@@ -352,14 +352,16 @@ def _include_routers(app: FastAPI) -> None:
         epias_router,
         rewards_router,
         wallet_router,
+    )
+    from src.modules.energy.router import (
         router as energy_router,
     )
     from src.modules.integrations.router import router as integrations_router
     from src.modules.iot.router import router as iot_router
     from src.modules.notifications.router import router as notifications_router
     from src.modules.real_estate.router import router as real_estate_router
-    from src.modules.sse.router import router as sse_router
     from src.modules.socketio.router import router as socketio_router
+    from src.modules.sse.router import router as sse_router
     
     api_v1_prefix = settings.api_v1_str  # /api/v1
     

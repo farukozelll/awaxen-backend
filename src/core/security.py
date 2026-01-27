@@ -2,7 +2,7 @@
 Security Module
 JWT token management and password hashing.
 """
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from jose import JWTError, jwt

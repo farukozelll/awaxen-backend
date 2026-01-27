@@ -4,7 +4,7 @@ All models inherit from this base class.
 Automatically adds id (UUID), created_at, updated_at to all models.
 """
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import DateTime, MetaData, text
